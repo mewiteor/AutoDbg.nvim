@@ -1,0 +1,38 @@
+---@meta
+-- ---------------------------------------------------------------------------
+-- AutoDbg.nvim —— LuaLS 注解：x86 的线程上下文（`Context`）
+--
+-- 来源：由 AutoDbg 模块（迁移前）的 generate_templete() 模板迁入，并按架构拆分：
+--   字段表以 `src/core/context.cpp` 的 `k_context_fields`（x86 区）为准，共 23 项。
+--   旧模板里那 37 项 x64 专属字段（R8-R15 / Xmm0-15 / P1Home… / LastBranch…）在 x86
+--   上根本不存在，挂在这里会让补全给出**取到 nil** 的字段 → 所以只放 23 项。
+-- ❗这份文件只在脚本头标了 `arch=x86`（或 exe 名是 `AutoDbg_86.exe`）时才挂上，
+--   见 `lua/autodbg/lsp.lua`。
+-- ---------------------------------------------------------------------------
+
+---
+---GetContext 读取线程上下文（x86：23 项；没有 Xmm/R8-R15 等 x64 专属字段）
+---@class Context
+---@field ContextFlags LuaVariant
+---@field SegGs LuaVariant
+---@field SegFs LuaVariant
+---@field SegEs LuaVariant
+---@field SegDs LuaVariant
+---@field SegCs LuaVariant
+---@field SegSs LuaVariant
+---@field EFlags LuaVariant
+---@field Dr0 LuaVariant
+---@field Dr1 LuaVariant
+---@field Dr2 LuaVariant
+---@field Dr3 LuaVariant
+---@field Dr6 LuaVariant
+---@field Dr7 LuaVariant
+---@field Cax LuaVariant
+---@field Cbx LuaVariant
+---@field Ccx LuaVariant
+---@field Cdx LuaVariant
+---@field Csi LuaVariant
+---@field Cdi LuaVariant
+---@field Csp LuaVariant
+---@field Cbp LuaVariant
+---@field Cip LuaVariant

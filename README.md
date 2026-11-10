@@ -42,44 +42,90 @@ require("autodbg").setup({ url = "http://127.0.0.1:8642" })
 
 | 命令 | 作用 |
 | --- | --- |
-| `:AutoDbgRun` | 执行当前 buffer |
+| `:AutoDbgRun` | 执行当前 buffer（**本地或远程**，见下） |
 | `:'<,'>AutoDbgRun` | 只执行选区 |
 | `:AutoDbgRun <file>` | 执行指定文件（chunkname 用该文件名） |
-| `:AutoDbgCancel` | 取消正在跑的脚本（server 端 100 ms 粒度） |
-| `:AutoDbgHealth` | 看 server 状态（`busy` / `queue`），并打印**实际用的地址** |
-| `:AutoDbgHeader` | 在 buffer 头部插入 `--!autodbg url=…` 标记 |
+| `:AutoDbgCancel` | 取消：本地模式 kill 进程；远程模式发 `/cancel`（100 ms 粒度） |
+| `:AutoDbgHealth` | 状态：本地报 `exe`/`arch`，远程打 `/health`（`busy`/`queue`） |
+| `:AutoDbgHeader [remote\|local]` | 在 buffer 头部插入 `--!autodbg …` 标记（`local` = `exe=… arch=…`） |
 | `:AutoDbgLsp [on\|off\|status]` | 手动挂/摘 LuaLS 注解库（默认按脚本标记懒启用） |
 
-## 在脚本里指定服务器（脚本头标记 / modeline）
+## 运行模式：本地 / 远程
 
-`setup{}` 里的 `url` / `token` 只是**默认值**；每个脚本可以在头部（前/后 5 行，必须是 `--` 注释）自己声明：
+插件有两种跑法，**按“能不能拿到 exe”自动选**（`setup{ mode = "auto" }` 是默认）：
+
+```text
+脚本里 exe=…  ──┐
+setup{ exe }   ──┼─→ 能拿到可执行的 exe ？── 是 ─→ 本地模式（直接跑 exe）
+PATH 里的 exe  ──┘                    └─ 否 ─→ 远程模式（HTTP /run，用 url/host/port）
+```
+
+- **本地优先**：只要“标记的 exe / `setup.exe` / PATH 里的 `AutoDbg_{64,86}.exe`”三者任一存在，就走本地；
+  即使同时写了 `url=` / `host=` / `port=`，也**先试本地**；
+- **回落远程**：标记里写了 `exe=` 但那个文件不存在 → 提示一次“找不到 exe，已回退远程”，然后走 `url`；
+- **强制**：`setup{ mode = "remote" }` 完全不找 exe；`setup{ mode = "local" }` 则必须本地（找不到就报错，不静默回落）。
+
+本地模式的细节：
+
+- buffer 内容写到系统临时目录的一个临时文件，跑完即删（AutoDbg 的命令行只接受脚本路径）；
+  错误信息里的临时路径会被换回你的 buffer 名字，所以 quickfix 跳转照常工作。
+- 默认带 `--quiet`（关错误弹窗；headless 下弹 MessageBox 会把进程挂住）：`setup{ local_flags }` 可改。
+- flavor 由脚本自己的 `--!lua` / `--!luajit` 决定（与命令行一致）；`--!autodbg` 标记会被 launcher 当**非 flavor 标记跳过**。
+- 工作目录 = 有文件名的 buffer 所在目录，否则 nvim 的 cwd。
+
+## 脚本头标记（modeline）
+
+`setup{}` 里的 `url` / `token` / `exe` 只是**默认值**；每个脚本可以在头部（前/后 5 行，必须是 `--` 注释）自己声明：
 
 ```lua
---!autodbg url=http://192.168.1.10:8642 token=deadbeef
---!autodbg host=192.168.1.10 port=8642      -- 只改地址/端口，其余仍用 setup 的
---!autodbg                                  -- 裸标记：只表示“这是 AutoDbg 脚本”（地址走 setup）
--- autodbg: url=http://127.0.0.1:8642       -- modeline 风格也认；`-- adbg:` 是短别名
+--!autodbg exe=C:/tools/AutoDbg_64.exe arch=x64     -- 本地模式（exe 不存在则回落远程）
+--!autodbg url=http://192.168.1.10:8642 token=deadbeef   -- 远程模式
+--!autodbg host=192.168.1.10 port=8642              -- 只改地址/端口，其余仍用 setup 的
+--!autodbg arch=x86                                 -- 只要标记 + 架构（补全按 x86）
+--!autodbg                                         -- 裸标记：只表示“这是 AutoDbg 脚本”
+-- autodbg: url=http://127.0.0.1:8642               -- modeline 风格也认；`-- adbg:` 是短别名
 
 Run({ imagepath = "C:\\target.exe" })
 ```
 
-- 键只有 `url` / `host` / `port` / `token`；多行/多键时**后出现的覆盖先出现的**。
-- 这个标记同时是 **LuaLS 补全的开关**（只对带标记的 buffer 挂注解），所以**无名 buffer 也能用**。
-- 想改远程地址又不想动配置？用 `:AutoDbgHeader` 插一行就够（不需要 LuaSnip）。
-- 结果表的 `url` / `mode`（`"modeline"` / `"setup"`）会告诉你这次到底连了哪里。
+| 键 | 含义 |
+| --- | --- |
+| `url` | 远程地址（优先于 host/port） |
+| `host` / `port` | 只改远程地址的一部分（未给的部分从 setup 的 `url` 里取） |
+| `token` | 远程模式的 bearer token（覆盖 `$AUTODBG_TOKEN` / token_file） |
+| `exe` | AutoDbg 的 exe 路径 → 走**本地模式** |
+| `arch` | `x86` / `x64`（别名 `32`/`64`/`i386`/`amd64`）→ 决定 LuaLS 挂哪份 `Context` 注解 |
+
+- 多行/多键时**后出现的覆盖先出现的**；
+- 这个标记同时是 **LuaLS 补全的开关**（只对带标记的 buffer 挂注解），所以**无名 buffer 也能用**；
+- 结果表里 `mode` = `"local"` / `"remote"`（怎么跑的），`url_mode` = `"modeline"` / `"setup"`（地址从哪来）。
 
 ## LuaLS 补全（取代模块的 `generate_templete`）
 
-本插件自带一份 LLS-Addons 结构的注解库：`addons/autodbg/{config.json, library/*.lua}`
-（`lualib` / `variant` / `callbacks` / `debugger` / `gui` / `file_io`，首行都是 `---@meta`）。
-打开一个**带 `--!autodbg` 标记的 buffer**时，插件把它加进 lua_ls 的 `Lua.workspace.library`：
-`Run` / `SetBreakpoint` / `gui.*` / `read_file` / `jsonx` / `moses` 等全部有签名与补全，
-而 AutoDbg 模块本身**不再往脚本目录写 `cdebugger.d.lua` / `.luarc.json`**。
+本插件自带一个注解库：
+
+```text
+nvim/addons/autodbg/
+  config.json
+  library/{lualib,variant,callbacks,debugger,gui,file_io}.lua   ← 与架构无关（首行 ---@meta）
+  arch/x64/context.lua    ← Context 60 项（含 Xmm0-15 / R8-R15 / P1Home…）
+  arch/x86/context.lua    ← Context 23 项（没有 Xmm/R8-R15）
+```
+
+打开一个**带 `--!autodbg` 标记的 buffer** 时，插件把 `library/` + `arch/<arch>/`
+加进 lua_ls 的 `Lua.workspace.library`：`Run` / `SetBreakpoint` / `gui.*` /
+`read_file` / `jsonx` / `moses` 等全部有签名与补全，而 AutoDbg 模块本身
+**不再往脚本目录写 `cdebugger.d.lua` / `.luarc.json`**。
+
+架构选择顺序：标记 `arch=` → 标记 `exe=` 的文件名（`AutoDbg_86.exe` → x86）→
+`setup{ lsp = { arch = … } }` → 默认 **x64**；换架构时插件会把另一份摘掉（两份同时挂着会让
+两份 `Context` 定义混在一起）。
 
 ```lua
 require("autodbg").setup({
   lsp = {
     enable = true,
+    arch = nil,              -- "x86" | "x64"；nil = 跟着脚本标记，再缺省 x64
     runtime_version = nil,   -- 例如 "Lua 5.5" / "LuaJIT"；nil = 不改 LuaLS 既有设置
   },
 })
@@ -101,7 +147,8 @@ require("luasnip").add_snippets("lua", require("autodbg.snippets").get())
 
 | 触发词 | 内容 |
 | --- | --- |
-| `adbg` | 脚本头标记（`--!autodbg url=… token=…`，地址与 LSP 开关都靠它） |
+| `adbg` | 脚本头标记（远程：`--!autodbg url=… token=…`） |
+| `adbgl` | 脚本头标记（本地：`--!autodbg exe=… arch=x64`） |
 | `adrun` | `Run({ imagepath, callback })` |
 | `adbp` | `SetBreakpoint({ modname, rva, callback })` |
 | `adrunbp` | Run + 入口回调里下断点（最常用组合） |
@@ -130,7 +177,11 @@ require("autodbg").setup({
   focus = true,            -- 结果 buffer 打开后是否跳过去
   keymaps = { run = nil, cancel = nil },   -- 例如 "<leader>dr" / "<leader>dc"
   modeline = { enable = true, head = 5, tail = 5 },  -- 脚本头标记的扫描范围
-  lsp = { enable = true, runtime_version = nil },    -- LuaLS 注解库
+  mode = "auto",           -- auto（有 exe 就本地）| local（必须本地）| remote（强制远程）
+  exe = nil,               -- AutoDbg 的 exe；nil = 去 PATH 里找 exe_names
+  exe_names = { "AutoDbg_64.exe", "AutoDbg_86.exe", "AutoDbg.exe", "autodbg.exe" },
+  local_flags = { "--quiet" },   -- 本地模式的固定参数（免 headless 被错误弹窗挂住）
+  lsp = { enable = true, arch = nil, runtime_version = nil },   -- arch: "x86"|"x64"|nil(跟标记/缺省 x64)
   snippets = { enable = true },                      -- LuaSnip 片段
 })
 ```

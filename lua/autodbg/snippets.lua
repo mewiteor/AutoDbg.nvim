@@ -9,7 +9,8 @@
 --   · 手动：`require("luasnip").add_snippets("lua", require("autodbg.snippets").get())`
 --
 -- 片段（触发词 → 作用）：
---   adbg      脚本头标记（`--!autodbg url=… token=…`，LSP 注解与远程地址都靠它）
+--   adbg      脚本头标记（远程模式：`--!autodbg url=… token=…`）
+--   adbgl     脚本头标记（本地模式：`--!autodbg exe=… arch=x64`）
 --   adrun     Run({ imagepath, callback })
 --   adbp      SetBreakpoint({ modname, rva, callback })
 --   adrunbp   Run + 入口回调里下断点（最常用的组合）
@@ -53,8 +54,8 @@ function M.get()
 
   local list = {}
 
-  -- 脚本头标记：LSP 注解与远程地址都由它决定（换机器只改这一行）
-  list[#list + 1] = s({ trig = "adbg", dscr = "AutoDbg: 脚本头标记（远程地址 / LSP 开关）" }, {
+  -- 脚本头标记（远程）：LSP 注解与远程地址都由它决定（换机器只改这一行）
+  list[#list + 1] = s({ trig = "adbg", dscr = "AutoDbg: 脚本头标记（远程 URL）" }, {
     t("--!autodbg url=http://"),
     i(1, "127.0.0.1"),
     t(":"),
@@ -62,6 +63,15 @@ function M.get()
     t(" token="),
     i(3, ""),
     t({ "", "-- AutoDbg 脚本：:AutoDbgRun 执行 / :AutoDbgHealth 看状态 / :AutoDbgCancel 取消" }),
+  })
+
+  -- 脚本头标记（本地）：exe 路径 + 架构（arch 同时决定 LuaLS 挂哪份 Context 注解）
+  list[#list + 1] = s({ trig = "adbgl", dscr = "AutoDbg: 脚本头标记（本地 exe + arch）" }, {
+    t("--!autodbg exe="),
+    i(1, "C:\\tools\\AutoDbg_64.exe"),
+    t(" arch="),
+    c(2, { t("x64"), t("x86") }),
+    t({ "", "-- AutoDbg 脚本（本地模式）：直接跑上面的 exe；找不到它会回退到远程" }),
   })
 
   list[#list + 1] = s({ trig = "adrun", dscr = "AutoDbg: Run({ imagepath, callback })" }, {

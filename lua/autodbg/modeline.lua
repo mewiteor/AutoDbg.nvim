@@ -6,15 +6,19 @@
 --
 -- 语法（只看前 5 行与后 5 行，行必须是 `--` 注释；口径与 vim 的 modeline 一致）：
 --
---   --!autodbg url=http://192.168.1.10:8642 token=deadbeef
+--   --!autodbg url=http://192.168.1.10:8642 token=deadbeef     （远程模式）
+--   --!autodbg exe=C:/tools/AutoDbg_64.exe arch=x64            （本地模式）
 --   --!autodbg host=192.168.1.10 port=8642
 --   -- autodbg: url=http://127.0.0.1:8642      （modeline 风格也认）
 --   -- adbg: port=9000                        （短别名）
 --   --!autodbg                               （裸标记：只表示「这是 AutoDbg 脚本」）
 --
--- 键：`url` / `host` / `port` / `token`，覆盖 setup 的默认值。
---   · `url` 同时给出时优先；只给 host/port 时，未给的字段从 setup 的 url 里取。
---   · 多行/多键时**后出现的覆盖先出现的**。
+-- 键：
+--   · `url` / `host` / `port` / `token`：远程地址（覆盖 setup 的默认值）。
+--     `url` 同时给出时优先；只给 host/port 时，未给的字段从 setup 的 url 里取。
+--   · `exe`：AutoDbg 的 exe 路径 → 有它就走**本地模式**（找不到这个文件时回落远程）。
+--   · `arch`：`x86` / `x64`（别名 32/64/i386/amd64）→ 决定 LuaLS 挂哪一份 `Context` 注解。
+-- 多行/多键时**后出现的覆盖先出现的**。
 -- 这个标记同时也是 LuaLS 注解的开关依据（见 `lua/autodbg/lsp.lua`）：
 --   没有标记的 buffer 不会被当成 AutoDbg 脚本。无名 buffer 一样能用。
 -- =============================================================================
@@ -23,6 +27,44 @@ local M = {}
 
 local DEFAULT_HEAD = 5
 local DEFAULT_TAIL = 5
+
+--- arch 别名表（大小写不敏感）
+local ARCH_ALIASES = {
+  x86 = "x86",
+  ["32"] = "x86",
+  i386 = "x86",
+  x32 = "x86",
+  win32 = "x86",
+  x64 = "x64",
+  ["64"] = "x64",
+  amd64 = "x64",
+  x86_64 = "x64",
+  win64 = "x64",
+}
+
+--- 把 `x86` / `32` / `amd64` 之类归一成 "x86" | "x64"；不认识的返回 nil
+---@param v string?
+---@return string?
+function M.normalize_arch(v)
+  if type(v) ~= "string" then
+    return nil
+  end
+  return ARCH_ALIASES[v:lower()]
+end
+
+--- 从 exe 文件名猜架构（`AutoDbg_86.exe` → x86，`AutoDbg_64.exe` → x64）
+---@param path string?
+---@return string?
+function M.arch_from_exe(path)
+  local name = tostring(path or ""):lower()
+  if name:find("_64", 1, true) or name:find("64%.exe$") then
+    return "x64"
+  end
+  if name:find("_86", 1, true) or name:find("_98", 1, true) or name:find("86%.exe$") then
+    return "x86"
+  end
+  return nil
+end
 
 --- `-- ...` 注释体；不是注释返回 nil
 ---@param line string
@@ -80,7 +122,7 @@ end
 --- 解析一段行（`offset` 用于把行号还原成绝对行号）
 ---@param lines string[]
 ---@param offset integer 0 表示 lines[1] 是文件第 1 行
----@return table { found, line, url?, host?, port?, token? }
+---@return table { found, line, url?, host?, port?, token?, exe?, arch? }
 function M.parse(lines, offset)
   local res = { found = false }
   for i, line in ipairs(lines or {}) do
@@ -90,6 +132,12 @@ function M.parse(lines, offset)
       res.line = (offset or 0) + i
       parse_kv(rest, res)
     end
+  end
+  if res.arch ~= nil then
+    res.arch = M.normalize_arch(res.arch) or res.arch
+  end
+  if res.exe ~= nil then
+    res.exe = vim.fn.expand(res.exe)
   end
   return res
 end

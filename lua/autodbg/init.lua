@@ -22,7 +22,12 @@
 local effects = require("autodbg.effects")
 local http = require("autodbg.http")
 local modeline = require("autodbg.modeline")
+local run_local = require("autodbg.local")
 local ui = require("autodbg.ui")
+
+--- 已经提示过「标记的 exe 不存在」的 buffer（避免反复刷屏）
+---@type table<string, boolean>
+local warned_local = {}
 
 local M = {}
 
@@ -47,9 +52,16 @@ M.config = {
     head = 5,           -- 看前 N 行
     tail = 5,           -- 看后 N 行（与 vim 的 modeline 同口径）
   },
+  -- 运行模式："auto"（有 exe 就本地，否则远程）| "local"（必须本地）| "remote"（强制远程）
+  mode = "auto",
+  -- AutoDbg 的 exe（本地模式）；nil = 去 PATH 里找 exe_names
+  exe = nil,
+  exe_names = nil,      -- 默认 { "AutoDbg_64.exe", "AutoDbg_86.exe", "AutoDbg.exe", "autodbg.exe" }
+  local_flags = { "--quiet" },  -- 本地模式的固定参数（--quiet 关错误弹窗，免 headless 被 MessageBox 挂住）
   -- 把 LuaLS 注解库挂到 lua_ls（取代 AutoDbg 模块的 generate_templete）
   lsp = {
     enable = true,
+    arch = nil,            -- "x86" | "x64"；nil = 跟着脚本标记，再缺省 x64
     runtime_version = nil, -- 例如 "Lua 5.5" / "LuaJIT"；nil = 不改 LuaLS 的既有设置
   },
   -- LuaSnip 片段（检测不到 LuaSnip 时安静跳过）
@@ -130,6 +142,12 @@ local function effective(over, bufnr)
   if ml.token and ml.token ~= "" then
     cfg.token = ml.token
   end
+  if ml.exe and ml.exe ~= "" then
+    cfg.exe = ml.exe
+  end
+  if ml.arch then
+    cfg.arch = modeline.normalize_arch(ml.arch) or ml.arch
+  end
   cfg.modeline_hit = ml
   return cfg, ml
 end
@@ -176,9 +194,9 @@ local function to_result(cfg, resp, extra)
     stdout = "",
     stderr = "",
     error = nil,
-    -- 实际用的地址与来源（setup 默认值 / 脚本头部标记），失败分支也要带着它
+    -- 实际用的地址与**地址来源**（setup 默认值 / 脚本头部标记），失败分支也要带着它
     url = cfg.url,
-    mode = (cfg.modeline_hit and "modeline" or "setup"),
+    url_mode = (cfg.modeline_hit and "modeline" or "setup"),
   }
 
   if resp.err then
@@ -242,9 +260,72 @@ end
 -- 远程地址 / token 的优先级：配置传入的 > 脚本头部的 `--!autodbg` 标记 > setup 默认值
 function M.run(opts)
   opts = opts or {}
-  local cfg = effective(opts.cfg, vim.api.nvim_get_current_buf())
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = effective(opts.cfg, bufnr)
   local body, file = buf_script(opts.range)
+  local mode, exe, why = M.resolve_mode(cfg)
 
+  local function handle(res)
+    if opts.open ~= "none" and cfg.open ~= "none" then
+      show(cfg, res, file)
+    end
+    if opts.on_done then
+      opts.on_done(res)
+    end
+    return opts.sync and res or nil
+  end
+
+  -- ---------------- 本地模式：直接跑 exe ----------------
+  if mode == "local" then
+    if not exe then
+      local res = {
+        ok = false,
+        exit = -1,
+        stdout = "",
+        stderr = "",
+        error = "找不到 AutoDbg 的 exe（" .. tostring(why) .. "）；用 `exe=` 标记或 setup{ exe = … } 指定",
+        mode = "local",
+      }
+      notify_err(res.error)
+      return handle(res)
+    end
+    if why and why:match("^missing:") then
+      -- 标记里给了 exe 但那个文件不存在 → 已回退远程模式，提示一次即可
+      local missing = why:sub(#"missing:" + 1)
+      local key = bufnr .. ":" .. missing
+      if not warned_local[key] then
+        warned_local[key] = true
+        vim.notify("AutoDbg: 找不到 exe " .. missing .. "，已回退远程模式 " .. cfg.url, vim.log.levels.WARN)
+      end
+    end
+  end
+
+  if mode == "local" and exe then
+    local real = vim.api.nvim_buf_get_name(bufnr)
+    local cwd = nil
+    if real ~= "" then
+      cwd = vim.fn.fnamemodify(real, ":p:h")
+    end
+    return run_local.run({
+      exe = exe,
+      body = body,
+      filename = file,
+      real_path = real ~= "" and vim.fn.fnamemodify(real, ":p") or nil,
+      args = opts.args,
+      cwd = cwd,
+      flags = cfg.local_flags,
+      timeout_ms = cfg.timeout_ms,
+      sync = opts.sync,
+      on_done = function(res)
+        res.mode = "local"
+        res.url_mode = cfg.modeline_hit and "modeline" or "setup"
+        res.arch = res.arch or cfg.arch
+        handle(res)
+      end,
+    })
+  end
+
+  -- ---------------- 远程模式（默认） ----------------
   local headers = {
     ["Content-Type"] = "text/x-lua; charset=utf-8",
     ["X-AutoDbg-Filename"] = file,
@@ -262,19 +343,11 @@ function M.run(opts)
     sync_timeout_ms = cfg.sync_timeout_ms,
   }
 
-  local function handle(resp)
+  local function handle_remote(resp)
     local res = to_result(cfg, resp, {})
-    if opts.open ~= "none" and cfg.open ~= "none" then
-      show(cfg, res, file)
-    end
-    if opts.on_done then
-      opts.on_done(res)
-    end
-    if opts.sync then
-      return res
-    end
+    res.mode = "remote"
+    return handle(res)
   end
-
   local resp = http.request(req_cfg, {
     method = "POST",
     path = "/run",
@@ -284,20 +357,56 @@ function M.run(opts)
   }, opts.sync and nil or function(r)
     -- S7：脚本可能要求改/读**本机**文件 → server 会挂起，这里把效果做完再送回
     effects.resolve(req_cfg, r, function(final_resp)
-      handle(final_resp)
+      handle_remote(final_resp)
     end)
   end)
 
   if opts.sync then
     resp = effects.resolve_sync(req_cfg, resp)
-    return handle(resp)
+    return handle_remote(resp)
   end
 end
 
---- 取消正在跑的那一次执行（默认发到当前 buffer 头部标记里的 server）
+--- 定运行模式：能拿到 exe → 本地；否则 → 远程
+-- 优先级：脚本标记 exe= > setup.exe > PATH 里的 AutoDbg_*.exe
+-- `setup{ mode = "remote" }` 可强制远程（不找 exe）；`mode = "local"` 表示「必须本地」。
+---@param cfg table
+---@return string mode "local" | "remote"
+---@return string? exe
+---@return string? why "modeline"|"config"|"PATH"|"missing:<path>"|"no-exe"|"forced"
+function M.resolve_mode(cfg)
+  local want = cfg.mode or "auto"
+  if want == "remote" then
+    return "remote", nil, "forced"
+  end
+  local exe, source, missing = run_local.resolve(cfg)
+  if exe then
+    return "local", exe, source
+  end
+  if want == "local" then
+    -- 强制本地：不静默回落，直接报缺 exe（缺哪条路径也说清楚）
+    return "local", nil, missing and ("missing:" .. missing) or "no-exe"
+  end
+  if missing then
+    return "remote", nil, "missing:" .. missing
+  end
+  return "remote", nil, "no-exe"
+end
+
+--- 取消正在跑的那一次执行（本地模式 kill 进程；远程模式发 `/cancel`）
 function M.cancel(opts)
   opts = opts or {}
-  local cfg = effective(opts.cfg, vim.api.nvim_get_current_buf())
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = effective(opts.cfg, bufnr)
+  local mode = M.resolve_mode(cfg)
+  if mode == "local" then
+    local killed = run_local.cancel()
+    if opts.sync then
+      return killed
+    end
+    vim.notify(killed and "AutoDbg: 已终止本地进程" or "AutoDbg: 当前没有在跑的本地进程", vim.log.levels.INFO)
+    return
+  end
   local req_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, curl = cfg.curl }
   local resp = http.request(req_cfg, { method = "POST", path = "/cancel", sync = opts.sync or true })
   local ok, decoded = pcall(vim.json.decode, resp.body or "")
@@ -308,14 +417,30 @@ function M.cancel(opts)
   vim.notify(accepted and "AutoDbg: 已请求取消" or "AutoDbg: 当前没有正在执行的脚本", vim.log.levels.INFO)
 end
 
---- 查看 server 状态（同样尊重当前 buffer 的标记）
+--- 查看状态（本地模式报 exe/arch，远程模式打 `/health`；同样尊重当前 buffer 的标记）
 function M.health(opts)
   opts = opts or {}
-  local cfg = effective(opts.cfg, vim.api.nvim_get_current_buf())
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = effective(opts.cfg, bufnr)
+  local mode, exe, why = M.resolve_mode(cfg)
+
+  if mode == "local" then
+    local arch = cfg.arch or require("autodbg.lsp").resolve_arch(bufnr, cfg)
+    local info = string.format("mode=local  exe=%s  arch=%s  (%s)", tostring(exe), tostring(arch), tostring(why))
+    local res = { ok = exe ~= nil, status = 200, body = info, mode = exe and "local" or "setup", url = nil, exe = exe, arch = arch }
+    if opts.sync then
+      return res
+    end
+    vim.notify("AutoDbg " .. info, vim.log.levels.INFO)
+    return res
+  end
+
   local req_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, curl = cfg.curl }
   local resp = http.request(req_cfg, { method = "GET", path = "/health", sync = true })
   resp.url = cfg.url
-  resp.mode = (cfg.modeline_hit and "modeline" or "setup")
+  resp.mode = "remote"
+  resp.url_mode = (cfg.modeline_hit and "modeline" or "setup")
+  resp.fallback = why and why:match("^missing:") and why or nil
   if opts.sync then
     return resp
   end
@@ -334,7 +459,8 @@ function M.marker(bufnr)
 end
 
 --- 在 buffer 头部插入 `--!autodbg` 标记（没 LuaSnip 也能用；已有标记就只提示）
----@param opts? { bufnr: integer?, force: boolean? }
+-- opts.kind："remote"（默认，url=…）| "local"（exe=… arch=…）
+---@param opts? { bufnr: integer?, force: boolean?, kind: string? }
 ---@return boolean ok
 function M.insert_header(opts)
   opts = opts or {}
@@ -344,7 +470,20 @@ function M.insert_header(opts)
     return false
   end
   local cfg = merged(opts.cfg)
-  local line = "--!autodbg url=" .. tostring(cfg.url)
+  local line
+  if (opts.kind or "remote") == "local" then
+    local exe = run_local.expand(cfg.exe) or run_local.find_in_path(cfg.exe_names)
+    local arch = cfg.arch or run_local.arch_of_exe(exe) or "x64"
+    if exe then
+      line = string.format("--!autodbg exe=%s arch=%s", exe, arch)
+    else
+      -- 找不到 exe 时不写半截路径（写了也会因 filereadable 失败而回落远程）
+      line = string.format("--!autodbg arch=%s", arch)
+      vim.notify("AutoDbg: PATH 里没找到 AutoDbg 的 exe；标记里只写了 arch（请自己补 exe=…）", vim.log.levels.WARN)
+    end
+  else
+    line = "--!autodbg url=" .. tostring(cfg.url)
+  end
   vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, { line })
   vim.notify("AutoDbg: 已插入标记 " .. line, vim.log.levels.INFO)
   return true

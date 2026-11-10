@@ -2,10 +2,10 @@
 -- nvim/plugin/autodbg.lua —— 命令与 autocmd 注册（runtimepath 里加载本目录即生效）
 --
 -- 命令：
---   :AutoDbgRun [range]   执行当前 buffer / 选区
---   :AutoDbgCancel        取消正在执行的脚本
---   :AutoDbgHealth        server 状态（busy/queue），并打印实际用的地址
---   :AutoDbgHeader        在 buffer 头部插入 `--!autodbg` 标记（含远程地址）
+--   :AutoDbgRun [range]   执行当前 buffer / 选区（有 exe 就本地，否则远程）
+--   :AutoDbgCancel        取消：本地模式杀进程，远程模式发 /cancel
+--   :AutoDbgHealth        状态（本地报 exe/arch，远程打 /health）
+--   :AutoDbgHeader [local|remote]  在 buffer 头部插入 `--!autodbg` 标记
 --   :AutoDbgLsp [on|off]  手动挂/摘 LuaLS 注解库（默认按脚本标记懒启用）
 --
 -- autocmd：
@@ -37,9 +37,19 @@ vim.api.nvim_create_user_command("AutoDbgHealth", function()
   require("autodbg").health()
 end, { desc = "AutoDbg: 查看 server 状态" })
 
-vim.api.nvim_create_user_command("AutoDbgHeader", function()
-  require("autodbg").insert_header()
-end, { desc = "AutoDbg: 在 buffer 头部插入 --!autodbg 标记" })
+vim.api.nvim_create_user_command("AutoDbgHeader", function(o)
+  local kind = vim.trim(o.args or "")
+  if kind ~= "local" and kind ~= "remote" then
+    kind = nil
+  end
+  require("autodbg").insert_header({ kind = kind })
+end, {
+  nargs = "?",
+  complete = function()
+    return { "remote", "local" }
+  end,
+  desc = "AutoDbg: 插入 --!autodbg 标记（remote=url / local=exe+arch）",
+})
 
 vim.api.nvim_create_user_command("AutoDbgLsp", function(o)
   local lsp = require("autodbg.lsp")
@@ -48,9 +58,10 @@ vim.api.nvim_create_user_command("AutoDbgLsp", function(o)
     local n = lsp.disable()
     vim.notify(string.format("AutoDbg: 已摘掉 LuaLS 注解库（%d 个 client）", n), vim.log.levels.INFO)
   elseif arg == "on" or arg == "" then
-    local n = lsp.enable()
+    local arch = lsp.resolve_arch(vim.api.nvim_get_current_buf())
+    local n = lsp.enable(arch)
     vim.notify(
-      string.format("AutoDbg: 注解库 %s（改动 %d 个 lua_ls client）", lsp.addon_dir(), n),
+      string.format("AutoDbg: 注解库 arch=%s → %s（改动 %d 个 lua_ls client）", arch, lsp.addon_dir(), n),
       vim.log.levels.INFO
     )
   else

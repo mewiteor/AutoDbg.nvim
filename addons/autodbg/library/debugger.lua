@@ -122,7 +122,7 @@ function DelBreakpoint(modname, rva) end
 ---@field ea LuaVariant 断点地址
 ---@field index integer? 硬件断点dr寄存器序号，支持0~3
 ---@field type string 硬件断点类型，支持e: 执行、w: 写入、r: 读写
----@field size integer 硬件断点大小，支持
+---@field size integer 硬件断点大小，支持 1、2、4（x86）/ 1、2、4、8（x64）
 ---@field callback fun(info: HwBpInfo)? 硬件断点回调
 ---
 ---@class HwBpInfo
@@ -168,73 +168,9 @@ function ReadMemory(addr, size) end
 function WriteMemory(addr, new_data, is_up_intrin) end
 
 ---
----GetContext 读取线程上下文
----@class XMM
----@field Low LuaVariant
----@field High LuaVariant
----
----@class Context
----@field ContextFlags LuaVariant
----@field SegGs LuaVariant
----@field SegFs LuaVariant
----@field SegEs LuaVariant
----@field SegDs LuaVariant
----@field SegCs LuaVariant
----@field SegSs LuaVariant
----@field EFlags LuaVariant
----@field Dr0 LuaVariant
----@field Dr1 LuaVariant
----@field Dr2 LuaVariant
----@field Dr3 LuaVariant
----@field Dr6 LuaVariant
----@field Dr7 LuaVariant
----@field Cax LuaVariant
----@field Cbx LuaVariant
----@field Ccx LuaVariant
----@field Cdx LuaVariant
----@field Csi LuaVariant
----@field Cdi LuaVariant
----@field Csp LuaVariant
----@field Cbp LuaVariant
----@field Cip LuaVariant
----@field P1Home LuaVariant
----@field P2Home LuaVariant
----@field P3Home LuaVariant
----@field P4Home LuaVariant
----@field P5Home LuaVariant
----@field P6Home LuaVariant
----@field MxCsr LuaVariant
----@field R8 LuaVariant
----@field R9 LuaVariant
----@field R10 LuaVariant
----@field R11 LuaVariant
----@field R12 LuaVariant
----@field R13 LuaVariant
----@field R14 LuaVariant
----@field R15 LuaVariant
----@field Xmm0 XMM
----@field Xmm1 XMM
----@field Xmm2 XMM
----@field Xmm3 XMM
----@field Xmm4 XMM
----@field Xmm5 XMM
----@field Xmm6 XMM
----@field Xmm7 XMM
----@field Xmm8 XMM
----@field Xmm9 XMM
----@field Xmm10 XMM
----@field Xmm11 XMM
----@field Xmm12 XMM
----@field Xmm13 XMM
----@field Xmm14 XMM
----@field Xmm15 XMM
----@field VectorControla LuaVariant
----@field DebugControla LuaVariant
----@field LastBranchToRipa LuaVariant
----@field LastBranchFromRipa LuaVariant
----@field LastExceptionToRipa LuaVariant
----@field LastExceptionFromRipa LuaVariant
----
+---GetContext 读取线程上下文。`Context` 的字段**按架构**不同，定义在
+---   `addons/autodbg/arch/{x86,x64}/context.lua`：x86 = 23 项 / x64 = 60 项
+---   （x64 多 Xmm0-15 / R8-R15 / P1Home… / VectorControl / LastBranch…）。
 ---@type fun(tid: LuaVariant): Context
 function GetContext(tid) end
 

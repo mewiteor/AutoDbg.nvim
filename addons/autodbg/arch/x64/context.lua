@@ -1,0 +1,78 @@
+---@meta
+-- ---------------------------------------------------------------------------
+-- AutoDbg.nvim —— LuaLS 注解：x64 的线程上下文（`Context`）
+--
+-- 来源：由 AutoDbg 模块（迁移前）的 generate_templete() 模板迁入，并按架构拆分：
+--   字段表以 `src/core/context.cpp` 的 `k_context_fields`（`#ifdef _WIN64` 区）为准，
+--   共 60 项（比 x86 多 P1Home/MxCsr/R8-R15/Xmm0-15/VectorControl/DebugControl/LastBranch*）。
+-- ❗这份文件只在脚本头标了 `arch=x64`（或 exe 名是 `AutoDbg_64.exe`）时才挂上，
+--   见 `lua/autodbg/lsp.lua`。
+-- ---------------------------------------------------------------------------
+
+---@class XMM 128 位寄存器（低/高两个 64 位）
+---@field Low LuaVariant
+---@field High LuaVariant
+
+---
+---GetContext 读取线程上下文（x64：60 项）
+---@class Context
+---@field ContextFlags LuaVariant
+---@field SegGs LuaVariant
+---@field SegFs LuaVariant
+---@field SegEs LuaVariant
+---@field SegDs LuaVariant
+---@field SegCs LuaVariant
+---@field SegSs LuaVariant
+---@field EFlags LuaVariant
+---@field Dr0 LuaVariant
+---@field Dr1 LuaVariant
+---@field Dr2 LuaVariant
+---@field Dr3 LuaVariant
+---@field Dr6 LuaVariant
+---@field Dr7 LuaVariant
+---@field Cax LuaVariant
+---@field Cbx LuaVariant
+---@field Ccx LuaVariant
+---@field Cdx LuaVariant
+---@field Csi LuaVariant
+---@field Cdi LuaVariant
+---@field Csp LuaVariant
+---@field Cbp LuaVariant
+---@field Cip LuaVariant
+---@field P1Home LuaVariant
+---@field P2Home LuaVariant
+---@field P3Home LuaVariant
+---@field P4Home LuaVariant
+---@field P5Home LuaVariant
+---@field P6Home LuaVariant
+---@field MxCsr LuaVariant
+---@field R8 LuaVariant
+---@field R9 LuaVariant
+---@field R10 LuaVariant
+---@field R11 LuaVariant
+---@field R12 LuaVariant
+---@field R13 LuaVariant
+---@field R14 LuaVariant
+---@field R15 LuaVariant
+---@field Xmm0 XMM
+---@field Xmm1 XMM
+---@field Xmm2 XMM
+---@field Xmm3 XMM
+---@field Xmm4 XMM
+---@field Xmm5 XMM
+---@field Xmm6 XMM
+---@field Xmm7 XMM
+---@field Xmm8 XMM
+---@field Xmm9 XMM
+---@field Xmm10 XMM
+---@field Xmm11 XMM
+---@field Xmm12 XMM
+---@field Xmm13 XMM
+---@field Xmm14 XMM
+---@field Xmm15 XMM
+---@field VectorControl LuaVariant
+---@field DebugControl LuaVariant
+---@field LastBranchToRip LuaVariant
+---@field LastBranchFromRip LuaVariant
+---@field LastExceptionToRip LuaVariant
+---@field LastExceptionFromRip LuaVariant
