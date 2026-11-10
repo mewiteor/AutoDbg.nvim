@@ -226,6 +226,20 @@ AutoDbg 的 `read_file` / `write_file` 读写的是**客户端这台机器**上�
 - 文本模式（`"r"` / `"w"` / `"a"`）的行尾翻译在**客户端**做，与 `io.open` 语义一致。
 - 失败时脚本收到 `nil, errmsg`，可以自己判断。
 
+❗**调试回调里（`Attach`/`Run` 的 callback、断点回调）不能用**：这些回调是引擎经 C 调用进来的，
+而 `read_file`/`write_file` 靠「挂起协程等客户端」实现，跨不过这个边界（LuaJIT 根本不支持，
+Lua 5.5 也不允许跨普通 `lua_pcall`）。此时它们返回 `nil, <提示>`，不会把调试会话打断。写法：
+
+```lua
+local buf = {}
+Attach({ pid = pid, callback = function()
+    SetBreakpoint({ modname = "x.dll", rva = 0x1000, callback = function(info)
+        buf[#buf+1] = BsonEncode({ vols = … })   -- 回调里只收集
+    end })
+} })
+for _, b in ipairs(buf) do write_file("Z:\\out.bin", b, "wb") end  -- Attach 返回后再写
+```
+
 ## 直接调 API（脚本化）
 
 ```lua
