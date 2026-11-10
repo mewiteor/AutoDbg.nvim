@@ -1,0 +1,312 @@
+---@meta
+-- ---------------------------------------------------------------------------
+-- AutoDbg.nvim —— LuaLS 注解：烘焙进模块的 Lua 库（jsonx / inspect / moses，另含内部 effects / mcp）
+--
+-- 来源：由 AutoDbg 模块（迁移前）的 generate_templete() 模板原样迁入；
+--   之后新增的 API 见 lualib.lua（effects / mcp）与 file_io.lua（read_file / write_file）。
+-- 不要 require 本文件：它只给 lua_ls 看（首行 ---@meta）。
+-- ---------------------------------------------------------------------------
+
+---@meta
+
+---@class JsonxLib
+---@field encode fun(value: any):string
+---@field decode fun(text:string):any
+
+---@type JsonxLib
+jsonx = nil
+
+---@type fun(value:any, options?:table):string
+inspect = nil
+
+---@class MosesOperator
+---@field add fun(a:number, b:number):number
+---@field sub fun(a:number, b:number):number
+---@field mul fun(a:number, b:number):number
+---@field div fun(a:number, b:number):number
+---@field mod fun(a:number, b:number):number
+---@field exp fun(a:number, b:number):number
+---@field pow fun(a:number, b:number):number
+---@field unm fun(a:number):number
+---@field neg fun(a:number):number
+---@field floordiv fun(a:number, b:number):number
+---@field intdiv fun(a:number, b:number):number
+---@field eq fun(a:any, b:any):boolean
+---@field neq fun(a:any, b:any):boolean
+---@field lt fun(a:number, b:number):boolean
+---@field gt fun(a:number, b:number):boolean
+---@field le fun(a:number, b:number):boolean
+---@field ge fun(a:number, b:number):boolean
+---@field land fun(a:any, b:any):any
+---@field lor fun(a:any, b:any):any
+---@field lnot fun(a:any):any
+---@field concat fun(a:string, b:string):string
+---@field length fun(a:any):number
+---@field len fun(a:any):number
+
+---@class MosesLib
+---@field operator MosesOperator
+---@field op MosesOperator
+--- Table functions
+---@field clear fun(t:table):table
+---@field each fun(t:table, f:fun(v:any, k:any))
+---@field forEach fun(t:table, f:fun(v:any, k:any))
+---@field eachi fun(t:table, f:fun(v:any, k:any))
+---@field forEachi fun(t:table, f:fun(v:any, k:any))
+---@field at fun(t:table, ...:any):table
+---@field adjust fun(t:table, key:any, f:fun(v:any)|any):table
+---@field update fun(t:table, key:any, f:fun(v:any)|any):table
+---@field count fun(t:table, val?:any):number
+---@field countf fun(t:table, f:fun(v:any, k:any):boolean):number
+---@field allEqual fun(t:table, comp?:fun(a:any, b:any):boolean):boolean
+---@field alleq fun(t:table, comp?:fun(a:any, b:any):boolean):boolean
+---@field cycle fun(t:table, n?:number):fun():any
+---@field loop fun(t:table, n?:number):fun():any
+---@field map fun(t:table, f:fun(v:any, k:any):any):table
+---@field collect fun(t:table, f:fun(v:any, k:any):any):table
+---@field mapi fun(t:table, f:fun(v:any, k:any):any):table
+---@field reduce fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field inject fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field foldl fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field best fun(t:table, f:fun(state:any, value:any):boolean):any
+---@field reduceBy fun(t:table, f:fun(state:any, value:any):any, pred:fun(v:any, k:any):boolean, state?:any):any
+---@field reduceRight fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field injectr fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field foldr fun(t:table, f:fun(state:any, value:any):any, state?:any):any
+---@field mapReduce fun(t:table, f:fun(state:any, value:any):any, state?:any):table
+---@field mapr fun(t:table, f:fun(state:any, value:any):any, state?:any):table
+---@field mapReduceRight fun(t:table, f:fun(state:any, value:any):any, state?:any):table
+---@field maprr fun(t:table, f:fun(state:any, value:any):any, state?:any):table
+---@field include fun(t:table, value:any|fun(v:any, value:any):boolean):boolean
+---@field any fun(t:table, value:any|fun(v:any, value:any):boolean):boolean
+---@field some fun(t:table, value:any|fun(v:any, value:any):boolean):boolean
+---@field contains fun(t:table, value:any|fun(v:any, value:any):boolean):boolean
+---@field detect fun(t:table, value:any|fun(v:any, value:any):boolean):any
+---@field where fun(t:table, props:table):table|nil
+---@field findWhere fun(t:table, props:table):any
+---@field select fun(t:table, f:fun(v:any, k:any):boolean):table
+---@field filter fun(t:table, f:fun(v:any, k:any):boolean):table
+---@field reject fun(t:table, f:fun(v:any, k:any):boolean):table
+---@field discard fun(t:table, f:fun(v:any, k:any):boolean):table
+---@field all fun(t:table, f:fun(v:any, k:any):boolean):boolean
+---@field every fun(t:table, f:fun(v:any, k:any):boolean):boolean
+---@field invoke fun(t:table, method:any):table
+---@field pluck fun(t:table, key:any):table
+---@field max fun(t:table, transform?:fun(v:any, k:any):any):any
+---@field min fun(t:table, transform?:fun(v:any, k:any):any):any
+---@field same fun(a:table, b:table):boolean
+---@field sort fun(t:table, comp?:fun(a:any, b:any):boolean):table
+---@field sortedk fun(t:table, comp?:fun(a:any, b:any):boolean):fun():any, any
+---@field sortedv fun(t:table, comp?:fun(a:any, b:any):boolean):fun():any, any
+---@field sortBy fun(t:table, transform?:fun(v:any):any|string, comp?:fun(a:any, b:any):boolean):table
+---@field groupBy fun(t:table, iter:fun(v:any, k:any):any):table
+---@field countBy fun(t:table, iter:fun(v:any, k:any):any):table
+---@field size fun(...:any):number
+---@field containsKeys fun(t:table, other:table):boolean
+---@field sameKeys fun(tA:table, tB:table):boolean
+--- Array functions
+---@field sample fun(array:table, n?:number, seed?:number):table
+---@field sampleProb fun(array:table, prob:number, seed?:number):table
+---@field nsorted fun(array:table, n?:number, comp?:fun(a:any, b:any):boolean):table
+---@field shuffle fun(array:table, seed?:number):table
+---@field pack fun(...:any):table
+---@field find fun(array:table, value:any, from?:number):number|nil
+---@field reverse fun(array:table):table
+---@field fill fun(array:table, value:any, i?:number, j?:number):table
+---@field zeros fun(n:number):table
+---@field ones fun(n:number):table
+---@field vector fun(value:any, n:number):table
+---@field selectWhile fun(array:table, f:fun(v:any, k:any):boolean):table
+---@field takeWhile fun(array:table, f:fun(v:any, k:any):boolean):table
+---@field dropWhile fun(array:table, f:fun(v:any, k:any):boolean):table
+---@field rejectWhile fun(array:table, f:fun(v:any, k:any):boolean):table
+---@field sortedIndex fun(array:table, value:any, comp?:fun(a:any, b:any):boolean, sort?:boolean):number
+---@field indexOf fun(array:table, value:any):number|nil
+---@field lastIndexOf fun(array:table, value:any):number|nil
+---@field findIndex fun(array:table, pred:fun(v:any, k:any):boolean):number|nil
+---@field findLastIndex fun(array:table, pred:fun(v:any, k:any):boolean):number|nil
+---@field addTop fun(array:table, ...:any):table
+---@field prepend fun(array:table, ...:any):table
+---@field push fun(array:table, ...:any):table
+---@field shift fun(array:table, n?:number):...
+---@field pop fun(array:table, n?:number):...
+---@field unshift fun(array:table, n?:number):...
+---@field pull fun(array:table, ...:any):table
+---@field remove fun(array:table, ...:any):table
+---@field removeRange fun(array:table, start?:number, finish?:number):table
+---@field rmRange fun(array:table, start?:number, finish?:number):table
+---@field chop fun(array:table, start?:number, finish?:number):table
+---@field chunk fun(array:table, f?:fun(v:any, k:any):any):table
+---@field slice fun(array:table, start?:number, finish?:number):table
+---@field sub fun(array:table, start?:number, finish?:number):table
+---@field first fun(array:table, n?:number):table
+---@field head fun(array:table, n?:number):table
+---@field take fun(array:table, n?:number):table
+---@field initial fun(array:table, n?:number):table
+---@field last fun(array:table, n?:number):table
+---@field rest fun(array:table, index?:number):table
+---@field tail fun(array:table, index?:number):table
+---@field nth fun(array:table, index:number):any
+---@field compact fun(array:table):table
+---@field flatten fun(array:table, shallow?:boolean):table
+---@field difference fun(array:table, array2?:table):table
+---@field without fun(array:table, array2?:table):table
+---@field diff fun(array:table, array2?:table):table
+---@field union fun(...:table):table
+---@field intersection fun(...:table):table
+---@field disjoint fun(...:table):boolean
+---@field symmetricDifference fun(array:table, array2:table):table
+---@field symdiff fun(array:table, array2:table):table
+---@field xor fun(array:table, array2:table):table
+---@field unique fun(array:table):table
+---@field uniq fun(array:table):table
+---@field isunique fun(array:table):boolean
+---@field isuniq fun(array:table):boolean
+---@field duplicates fun(array:table):table
+---@field zip fun(...:table):table
+---@field transpose fun(...:table):table
+---@field zipWith fun(f:fun(...):any, ...:table):table
+---@field transposeWith fun(f:fun(...):any, ...:table):table
+---@field append fun(array:table, other:table):table
+---@field interleave fun(...:table):table
+---@field interpose fun(array:table, value:any):table
+---@field intersperse fun(array:table, value:any):table
+---@field range fun(from?:number, to?:number, step?:number):table
+---@field rep fun(value:any, n:number):table
+---@field powerset fun(array:table):table
+---@field partition fun(array:table, n?:number, pad?:any):fun():table
+---@field part fun(array:table, n?:number, pad?:any):fun():table
+---@field overlapping fun(array:table, n?:number, pad?:any):fun():table
+---@field aperture fun(array:table, n?:number):fun():table
+---@field sliding fun(array:table, n?:number):fun():table
+---@field pairwise fun(array:table):fun():table
+---@field permutation fun(array:table):fun():table
+---@field perm fun(array:table):fun():table
+---@field concat fun(array:table, sep?:string, i?:number, j?:number):string
+---@field join fun(array:table, sep?:string, i?:number, j?:number):string
+---@field xprod fun(array:table, array2:table):table
+---@field xpairs fun(value:any, array:table):table
+---@field xpairsRight fun(value:any, array:table):table
+---@field sum fun(array:table):number
+---@field product fun(array:table):number
+---@field mean fun(array:table):number
+---@field average fun(array:table):number
+---@field median fun(array:table):number|nil
+--- Utility functions
+---@field noop fun()
+---@field identity fun(value:any):any
+---@field call fun(f:fun(...):any, ...:any):any
+---@field constant fun(value:any):fun():any
+---@field always fun(value:any):fun():any
+---@field applySpec fun(specs:table):fun(...):table
+---@field thread fun(value:any, ...:any):any
+---@field threadRight fun(value:any, ...:any):any
+---@field dispatch fun(...:fun(...):any):fun(...):any
+---@field memoize fun(f:fun(key:any):any):fun(key:any):any
+---@field cache fun(f:fun(key:any):any):fun(key:any):any
+---@field unfold fun(f:fun(seed:any):any, any, seed:any):table
+---@field once fun(f:fun(...):any):fun(...):any
+---@field before fun(f:fun(...):any, count:number):fun(...):any
+---@field after fun(f:fun(...):any, count:number):fun(...):any
+---@field compose fun(...:fun(...):any):fun(...):any
+---@field pipe fun(value:any, ...:fun(...):any):any
+---@field complement fun(f:fun(...):boolean):fun(...):boolean
+---@field juxtapose fun(value:any, ...:fun(any):any):...
+---@field juxt fun(value:any, ...:fun(any):any):...
+---@field wrap fun(f:fun(...):any, wrapper:fun(f:fun(...):any, ...):any):fun(...):any
+---@field times fun(iter:fun(i:number):any, n?:number):table
+---@field bind fun(f:fun(...):any, v:any):fun(...):any
+---@field bind2 fun(f:fun(...):any, v:any):fun(...):any
+---@field bindn fun(f:fun(...):any, ...:any):fun(...):any
+---@field bindall fun(obj:table, ...:string):table
+---@field cond fun(conds:table):fun(...):any
+---@field both fun(...:fun(...):boolean):fun(...):boolean
+---@field either fun(...:fun(...):boolean):fun(...):boolean
+---@field neither fun(...:fun(...):boolean):fun(...):boolean
+---@field uniqueId fun(template?:string|fun(id:number):any):any
+---@field uid fun(template?:string|fun(id:number):any):any
+---@field iterator fun(f:fun(value:any):any, value:any, n?:number):fun():any
+---@field iter fun(f:fun(value:any):any, value:any, n?:number):fun():any
+---@field skip fun(iter:fun():any, n?:number):fun():any
+---@field tabulate fun(...:any):table
+---@field iterlen fun(...:any):number
+---@field castArray fun(value:any):table
+---@field flip fun(f:fun(...):any):fun(...):any
+---@field nthArg fun(n:number):fun(...):any
+---@field unary fun(f:fun(...):any):fun(...):any
+---@field ary fun(f:fun(...):any, n?:number):fun(...):any
+---@field nAry fun(f:fun(...):any, n?:number):fun(...):any
+---@field noarg fun(f:fun():any):fun():any
+---@field rearg fun(f:fun(...):any, indexes:table):fun(...):any
+---@field over fun(...:fun(...):any):fun(...):table
+---@field overEvery fun(...:fun(...):boolean):fun(...):boolean
+---@field overSome fun(...:fun(...):boolean):fun(...):boolean
+---@field overArgs fun(f:fun(...):any, ...:fun(v:any):any):fun(...):any
+---@field converge fun(f:fun(...):any, g:fun(...):any, h:fun(...):any):fun(...):any
+---@field partial fun(f:fun(...):any, ...:any):fun(...):any
+---@field partialRight fun(f:fun(...):any, ...:any):fun(...):any
+---@field curry fun(f:fun(...):any, n_args?:number):fun(...):any
+---@field time fun(f:fun(...):any, ...:any):number, ...
+--- Object functions
+---@field keys fun(obj:table):table
+---@field values fun(obj:table):table
+---@field path fun(obj:table, ...:any):any
+---@field spreadPath fun(obj:table, ...:any):table
+---@field flattenPath fun(obj:table, ...:any):table
+---@field kvpairs fun(obj:table):table
+---@field toObj fun(kvpairs:table):table
+---@field invert fun(obj:table):table
+---@field mirror fun(obj:table):table
+---@field property fun(key:any):fun(obj:table):any
+---@field propertyOf fun(obj:table):fun(key:any):any
+---@field toBoolean fun(value:any):boolean
+---@field extend fun(destObj:table, ...:table):table
+---@field functions fun(obj?:table, recurseMt?:boolean):table
+---@field methods fun(obj?:table, recurseMt?:boolean):table
+---@field clone fun(obj:table, shallow?:boolean):table
+---@field tap fun(obj:table, f:fun(obj:table)):table
+---@field has fun(obj:table, key:any):boolean
+---@field pick fun(obj:table, ...:string):table
+---@field choose fun(obj:table, ...:string):table
+---@field omit fun(obj:table, ...:string):table
+---@field drop fun(obj:table, ...:string):table
+---@field template fun(obj:table, template?:table):table
+---@field defaults fun(obj:table, template?:table):table
+---@field isEqual fun(objA:any, objB:any, useMt?:boolean):boolean
+---@field compare fun(objA:any, objB:any, useMt?:boolean):boolean
+---@field matches fun(objA:any, objB:any, useMt?:boolean):boolean
+---@field result fun(obj:table, method:any):any
+---@field isTable fun(t:any):boolean
+---@field isCallable fun(obj:any):boolean
+---@field isArray fun(obj:any):boolean
+---@field isIterable fun(obj:any):boolean
+---@field type fun(obj:any):string
+---@field isEmpty fun(obj?:any):boolean
+---@field isString fun(obj:any):boolean
+---@field isFunction fun(obj:any):boolean
+---@field isNil fun(obj:any):boolean
+---@field isNumber fun(obj:any):boolean
+---@field isNaN fun(obj:any):boolean
+---@field isFinite fun(obj:any):boolean
+---@field isBoolean fun(obj:any):boolean
+---@field isInteger fun(obj:any):boolean
+--- Chain & import
+---@field chain fun(value:any):MosesChain
+---@field import fun(context?:table, noConflict?:boolean):table
+
+---@class MosesChain
+---@field value fun(self):any
+
+---@type MosesLib
+moses = nil
+
+--------------------------------------------------------------------- 内部烘焙库（脚本一般不直接用）
+---@class EffectsLib 客户端文件 I/O 的效果还原（server 侧 `lualib/effects.lua`）
+---@field unpack fun(json_text: string): table?
+---@type EffectsLib
+effects = nil
+
+---@class McpLib MCP 的 JSON-RPC 分发（server 侧 `lualib/mcp.lua`）
+---@field dispatch fun(body: string): string
+---@type McpLib
+mcp = nil

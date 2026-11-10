@@ -1,0 +1,5 @@
+{
+    "name": "AutoDbg",
+    "files": ["*.autodbg.lua", "*.adbg.lua"],
+    "settings": {}
+}

@@ -46,7 +46,73 @@ require("autodbg").setup({ url = "http://127.0.0.1:8642" })
 | `:'<,'>AutoDbgRun` | 只执行选区 |
 | `:AutoDbgRun <file>` | 执行指定文件（chunkname 用该文件名） |
 | `:AutoDbgCancel` | 取消正在跑的脚本（server 端 100 ms 粒度） |
-| `:AutoDbgHealth` | 看 server 状态（`busy` / `queue`） |
+| `:AutoDbgHealth` | 看 server 状态（`busy` / `queue`），并打印**实际用的地址** |
+| `:AutoDbgHeader` | 在 buffer 头部插入 `--!autodbg url=…` 标记 |
+| `:AutoDbgLsp [on\|off\|status]` | 手动挂/摘 LuaLS 注解库（默认按脚本标记懒启用） |
+
+## 在脚本里指定服务器（脚本头标记 / modeline）
+
+`setup{}` 里的 `url` / `token` 只是**默认值**；每个脚本可以在头部（前/后 5 行，必须是 `--` 注释）自己声明：
+
+```lua
+--!autodbg url=http://192.168.1.10:8642 token=deadbeef
+--!autodbg host=192.168.1.10 port=8642      -- 只改地址/端口，其余仍用 setup 的
+--!autodbg                                  -- 裸标记：只表示“这是 AutoDbg 脚本”（地址走 setup）
+-- autodbg: url=http://127.0.0.1:8642       -- modeline 风格也认；`-- adbg:` 是短别名
+
+Run({ imagepath = "C:\\target.exe" })
+```
+
+- 键只有 `url` / `host` / `port` / `token`；多行/多键时**后出现的覆盖先出现的**。
+- 这个标记同时是 **LuaLS 补全的开关**（只对带标记的 buffer 挂注解），所以**无名 buffer 也能用**。
+- 想改远程地址又不想动配置？用 `:AutoDbgHeader` 插一行就够（不需要 LuaSnip）。
+- 结果表的 `url` / `mode`（`"modeline"` / `"setup"`）会告诉你这次到底连了哪里。
+
+## LuaLS 补全（取代模块的 `generate_templete`）
+
+本插件自带一份 LLS-Addons 结构的注解库：`addons/autodbg/{config.json, library/*.lua}`
+（`lualib` / `variant` / `callbacks` / `debugger` / `gui` / `file_io`，首行都是 `---@meta`）。
+打开一个**带 `--!autodbg` 标记的 buffer**时，插件把它加进 lua_ls 的 `Lua.workspace.library`：
+`Run` / `SetBreakpoint` / `gui.*` / `read_file` / `jsonx` / `moses` 等全部有签名与补全，
+而 AutoDbg 模块本身**不再往脚本目录写 `cdebugger.d.lua` / `.luarc.json`**。
+
+```lua
+require("autodbg").setup({
+  lsp = {
+    enable = true,
+    runtime_version = nil,   -- 例如 "Lua 5.5" / "LuaJIT"；nil = 不改 LuaLS 既有设置
+  },
+})
+```
+
+❗`Lua.workspace.library` 是 **lua_ls 的客户端级（全局）设置**，它不支持“只对某个文件生效”。
+所以插件是**懒启用**（没打开过 AutoDbg 脚本就不会动 lua_ls），但一旦启用，本次会话里其它
+Lua 文件也会看到这些注解。不想要时：`setup{ lsp = { enable = false } }` 或 `:AutoDbgLsp off`。
+
+## LuaSnip 片段
+
+`lua/autodbg/snippets.lua`（**不硬依赖** LuaSnip；未安装时静默跳过，不影响其它功能）：
+
+```lua
+require("autodbg").setup({ snippets = { enable = true } })   -- 在 FileType lua 时自动注册
+-- 或者手动：
+require("luasnip").add_snippets("lua", require("autodbg.snippets").get())
+```
+
+| 触发词 | 内容 |
+| --- | --- |
+| `adbg` | 脚本头标记（`--!autodbg url=… token=…`，地址与 LSP 开关都靠它） |
+| `adrun` | `Run({ imagepath, callback })` |
+| `adbp` | `SetBreakpoint({ modname, rva, callback })` |
+| `adrunbp` | Run + 入口回调里下断点（最常用组合） |
+| `adhw` | `SetHardwareBreakpoint({...})` |
+| `adctx` | `local ctx = GetContext(tid)` |
+| `admem` | `ReadMemory(addr, size)` |
+| `adstack` | `StackTrace(tid)` 追栈 |
+| `adexcept` | `Run` + `exception_callback` |
+| `adgui` | 找窗口 + 截图 + `write_file` |
+| `adclick` | `gui.activate(hwnd)` + `gui.click(x, y)` |
+| `adfile` | `read_file` / `write_file` |
 
 ## 配置
 
@@ -63,6 +129,9 @@ require("autodbg").setup({
   open = "split",          -- split | vsplit | float | none
   focus = true,            -- 结果 buffer 打开后是否跳过去
   keymaps = { run = nil, cancel = nil },   -- 例如 "<leader>dr" / "<leader>dc"
+  modeline = { enable = true, head = 5, tail = 5 },  -- 脚本头标记的扫描范围
+  lsp = { enable = true, runtime_version = nil },    -- LuaLS 注解库
+  snippets = { enable = true },                      -- LuaSnip 片段
 })
 ```
 

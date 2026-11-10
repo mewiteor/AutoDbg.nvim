@@ -1,0 +1,140 @@
+---@meta
+-- ---------------------------------------------------------------------------
+-- AutoDbg.nvim —— LuaLS 注解：回调与事件载荷类（Except* / On* / Position / OnConsoleEvent）
+--
+-- 来源：由 AutoDbg 模块（迁移前）的 generate_templete() 模板原样迁入；
+--   之后新增的 API 见 lualib.lua（effects / mcp）与 file_io.lua（read_file / write_file）。
+-- 不要 require 本文件：它只给 lua_ls 看（首行 ---@meta）。
+-- ---------------------------------------------------------------------------
+
+---@class ExceptSInfo
+---@field type string|LuaVariant|nil 内存访问异常类型：读取、写入、DEP
+---@field address LuaVariant? 内存访问异常数据地址
+---@field nt_status LuaVariant? 内存访问异常NTSTATUS
+---@field obj_ptr LuaVariant? c++异常对象指针 
+---@field obj_class_name string? c++异常对象类型名 
+---@field obj_type_info_ptr LuaVariant? c++异常对象类型信息地址 
+---@field module_hinstance LuaVariant|string|nil c++异常模块句柄、名称
+---@field args LuaVariant[]? 一般异常参数
+---
+---@class ExceptRecord
+---@field code LuaVariant 异常代码
+---@field code_name string? 异常代码名称
+---@field code_info string? 异常代码信息
+---@field flag LuaVariant 异常标志
+---@field non_continuable boolean 是否为不可持续异常?
+---@field address LuaVariant 异常地址
+---@field information ExceptSInfo 异常信息
+---
+---@class ExceptInfo
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field first_chance boolean 第一次触发此异常?
+---@field records ExceptRecord[] 异常记录
+---
+---@class OnEnvWithCode
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field code LuaVariant
+---
+---@class OnEnvWithCodeAndAddr
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field code LuaVariant
+---@field addr LuaVariant
+---
+---@class OnEnvWithAddr
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field addr LuaVariant
+---
+---@class OnCreateProcess
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field addr LuaVariant
+---@field base LuaVariant
+---@field path string
+---
+---@class OnLoadDll
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field base LuaVariant
+---@field path string
+---
+---@class OnUnloadDll
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field base LuaVariant
+---
+---@class OnOutputDebugString
+---@field pid LuaVariant
+---@field tid LuaVariant
+---@field str string
+---
+---@class OnRip
+---@field pid LuaVariant
+---@field tid LuaVariant
+---
+---@class Position
+---@field x LuaVariant
+---@field y LuaVariant
+---
+---@class OnKeyPressEventState
+---@field mouse_moved boolean|nil
+---@field double_click boolean|nil
+---@field mouse_wheeled boolean|nil
+---@field mouse_hwheeled boolean|nil
+---
+---@class OnKeyPressBtnState
+---@field from_left_1st_button_pressed boolean|nil
+---@field rightmost_button_pressed boolean|nil
+---@field from_left_2nd_button_pressed boolean|nil
+---@field from_left_3rd_button_pressed boolean|nil
+---@field from_left_4th_button_pressed boolean|nil
+---
+---@class OnKeyPressState
+---@field left_alt boolean|nil
+---@field right_alt boolean|nil
+---@field left_ctrl boolean|nil
+---@field right_ctrl boolean|nil
+---@field shift boolean|nil
+---@field numlock_on boolean|nil
+---@field scrolllock_on boolean|nil
+---@field capslock_on boolean|nil
+---@field enhanced_key boolean|nil
+---@field nls_dbcschar boolean|nil
+---@field nls_alphanumeric boolean|nil
+---@field nls_katakana boolean|nil
+---@field nls_hiragana boolean|nil
+---@field nls_roman boolean|nil
+---@field nls_ime_conversion boolean|nil
+---@field altnumpad_bit boolean|nil
+---@field nls_ime_disable boolean|nil
+---
+---@class OnConsoleEvent
+---@field type string key,mouse,window_buffer_size,menu,focus
+---
+---key
+---@field down boolean
+---@field repeat_count LuaVariant
+---@field vk_code string|LuaVariant
+---@field vs_code LuaVariant
+---@field char string
+---@field key_state OnKeyPressState
+---
+---mouse
+---@field pos Position
+---@field btn_state OnKeyPressBtnState
+---@field key_state OnKeyPressState
+---@field event_flag OnKeyPressEventState
+---
+---window_buffer_size
+---@field width LuaVariant
+---@field height LuaVariant
+---
+---menu
+---@field cmdid LuaVariant
+---
+---focus
+---@field set_focus boolean
+---
