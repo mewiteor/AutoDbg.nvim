@@ -192,6 +192,17 @@ require("autodbg").setup({
 require("autodbg").setup({ url = "http://192.168.1.10:8642", token = "…" })
 ```
 
+不知道服务器 IP？让 server 自己告诉你 —— 用 `--server-addr=0.0.0.0:8642` 启动时，
+它会在启动横幅里列出**本机各网卡的地址 + 网卡描述**，直接抄一条进脚本头即可：
+
+```text
+$ AutoDbg_64.exe --server --server-addr=0.0.0.0:8642 --server-token=abcdefgh
+autodbg server: listen=0.0.0.0:8642 (auth: bearer, token abcdefgh)
+autodbg server: 本机网卡地址（client 填其中任一条）:
+        192.168.0.195    Intel(R) Wi-Fi 6 AX201 160MHz
+        172.30.224.1     Hyper-V Virtual Ethernet Adapter
+```
+
 ## 结果 buffer 长什么样
 
 ```text
