@@ -216,29 +216,37 @@ autodbg server: 本机网卡地址（client 填其中任一条）:
 
 失败时首行会变成 `-- autodbg: FAILED exit=3 … (canceled)`/`(timed out)`/`(output truncated)`。
 
-## 客户端文件 I/O（server 模式下的 `read_file` / `write_file`）
+## 客户端文件 I/O
 
-AutoDbg 的 `read_file` / `write_file` 读写的是**客户端这台机器**上的文件。server 执行到它们时会挂起并回
-`pending{token, effects}`，插件自动在本机把 effect 执行掉、`POST /effects?token=…` 送回结果，
-直到脚本跑完（最多 16 轮）；挂起前的输出会拼回最终结果，所以看到的是完整 stdout。
+插件默认用**流式**跑远程脚本（`setup{ stream = true }`），所以客户端文件有两种写法：
 
-- 二进制安全（跨网络走 base64，本地按 `rb`/`wb` 处理）。
-- 文本模式（`"r"` / `"w"` / `"a"`）的行尾翻译在**客户端**做，与 `io.open` 语义一致。
-- 失败时脚本收到 `nil, errmsg`，可以自己判断。
-
-❗**调试回调里（`Attach`/`Run` 的 callback、断点回调）不能用**：这些回调是引擎经 C 调用进来的，
-而 `read_file`/`write_file` 靠「挂起协程等客户端」实现，跨不过这个边界（LuaJIT 根本不支持，
-Lua 5.5 也不允许跨普通 `lua_pcall`）。此时它们返回 `nil, <提示>`，不会把调试会话打断。写法：
+### ① `open_file`（推荐：大块数据 / 调试回调里）
 
 ```lua
-local buf = {}
-Attach({ pid = pid, callback = function()
-    SetBreakpoint({ modname = "x.dll", rva = 0x1000, callback = function(info)
-        buf[#buf+1] = BsonEncode({ vols = … })   -- 回调里只收集
+local f, e = open_file("Z:/datas.bin", "wb")
+if not f then print("ERROR: " .. e) else
+    Attach({ pid = pid, callback = function()
+        SetBreakpoint({ modname = "x.dll", rva = 0x1000, callback = function(info)
+            local c = GetContext(info.tid)
+            f:write(BsonEncode({ vols = V(c.Ccx):tos("d", 130) }))   -- 回调里也能写
+        end })
     end })
-} })
-for _, b in ipairs(buf) do write_file("Z:\\out.bin", b, "wb") end  -- Attach 返回后再写
+    f:close()      -- 脚本末尾（回调之外）
+end
 ```
+
+- 数据由**服务端脚本线程直接写进 `/run` 的连接**（帧 + chunked），**不落盘、不占脚本内存**，
+  总大小只受磁盘限制；插件收到 `data` 帧就直接追加到本地文件。
+- 背压交给 socket：你读得慢就压在发送缓冲，服务端断开就 `f:write` 返回 `nil, err`。
+- `print` / `Error*` 也走同一个流，长会话能实时看到输出。
+- ❗必须调 `f:close()`；忘了只会收到一条服务端警告（客户端句柄会被插件收尾关闭）。
+- 本地模式（有 exe 时）`open_file` 就是真文件，同一份脚本两边都能跑。
+
+### ② `write_file` / `read_file`（一次性、小数据）
+
+只在**非流式**模式（`setup{ stream = false }`）下可用：server 执行到它们会挂起并回
+`pending{token, effects}`，插件在本机执行后 `POST /effects?token=…` 送回，最多 16 轮。
+**调试回调里不能用**（回调是 C 调用进来的，挂不起协程）——那种场景请用 `open_file`。
 
 ## 直接调 API（脚本化）
 

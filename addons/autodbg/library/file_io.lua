@@ -23,3 +23,21 @@ function read_file(path, mode, opts) end
 ---@param opts {append: boolean?}?
 ---@return integer? written, string? err
 function write_file(path, data, mode, opts) end
+
+--------------------------------------------------------------------- 流式文件（大块数据 / 调试回调里用）
+--- 文件对象（`open_file` 的返回值）。server 流式模式下 `f:write` 由脚本线程直接写
+--- `/run` 的连接（不 yield、不占内存），所以**断点/异常回调里也能用**。
+---@class AutoDbgFile : userdata
+---@field write fun(self: AutoDbgFile, ...: (string|number)): integer?, string?
+---@field flush fun(self: AutoDbgFile): boolean
+---@field close fun(self: AutoDbgFile): boolean?, string?
+local AutoDbgFile = {}
+
+---
+---打开一个**客户端（本机）**上的文件，返回可增量写的文件对象（用法与 `io.open` 一致）。
+---本地模式：真文件；server 模式：需要流式请求（插件默认开，头 `X-AutoDbg-Stream: 1`）。
+---❗在脚本末尾（调试回调**之外**）调 `f:close()`。
+---@param path string
+---@param mode string? "wb"（默认）/ "w" / "ab" / "a"
+---@return AutoDbgFile? file, string? err
+function open_file(path, mode) end

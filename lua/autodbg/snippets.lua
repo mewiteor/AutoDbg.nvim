@@ -180,7 +180,7 @@ function M.get()
     i(0, ""),
   })
 
-  list[#list + 1] = s({ trig = "adfile", dscr = "AutoDbg: 读写客户端（本机）文件" }, {
+  list[#list + 1] = s({ trig = "adfile", dscr = "AutoDbg: 一次性读写客户端文件（小数据、非流式）" }, {
     t("local data, err = read_file("),
     i(1, '"C:\\\\tmp\\\\in.bin"'),
     t(")"),
@@ -188,6 +188,16 @@ function M.get()
     i(2, "C:\\\\tmp\\\\out.bin"),
     t({ '", data, "wb")' }),
     i(0, ""),
+  })
+
+  -- 流式写（大块数据 / 调试回调里也能用）：open_file + f:write + close
+  list[#list + 1] = s({ trig = "adfopen", dscr = "AutoDbg: open_file 流式写客户端文件" }, {
+    t({ 'local f, e = open_file("' }),
+    i(1, "Z:/out.bin"),
+    t({ '", "wb")', "if not f then", '    print("ERROR: " .. tostring(e))', "else" }),
+    t({ "    " }),
+    i(0, "-- Attach/Run 的回调里可以直接 f:write(...)"),
+    t({ "", "    f:close()", "end" }),
   })
 
   return list

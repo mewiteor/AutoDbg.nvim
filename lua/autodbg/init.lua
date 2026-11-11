@@ -23,6 +23,7 @@ local effects = require("autodbg.effects")
 local http = require("autodbg.http")
 local modeline = require("autodbg.modeline")
 local run_local = require("autodbg.local")
+local stream = require("autodbg.stream")
 local ui = require("autodbg.ui")
 
 --- 已经提示过「标记的 exe 不存在」的 buffer（避免反复刷屏）
@@ -58,6 +59,8 @@ M.config = {
   exe = nil,
   exe_names = nil,      -- 默认 { "AutoDbg_64.exe", "AutoDbg_86.exe", "AutoDbg.exe", "autodbg.exe" }
   local_flags = { "--quiet" },  -- 本地模式的固定参数（--quiet 关错误弹窗，免 headless 被 MessageBox 挂住）
+  -- 远程模式用**流式**响应（帧 + chunked）：`open_file`/`f:write` 才能边跑边写
+  stream = true,
   -- 把 LuaLS 注解库挂到 lua_ls（取代 AutoDbg 模块的 generate_templete）
   lsp = {
     enable = true,
@@ -325,7 +328,103 @@ function M.run(opts)
     })
   end
 
-  -- ---------------- 远程模式（默认） ----------------
+  -- ---------------- 远程模式：流式（帧 + chunked） ----------------
+  -- `open_file`/`f:write` 只有在流式请求里才能用（脚本线程直接写这条连接），
+  -- 所以默认走流式；`setup{ stream = false }` 回退到老的一次性 JSON + /effects。
+  if cfg.stream then
+    local outs, errs = {}, {}
+    local files = {}          -- id → { fh, path }
+    local file_err = nil
+
+    local handlers = {
+      on_out = function(which, data)
+        local t = (which == 2) and errs or outs
+        t[#t + 1] = data
+      end,
+      on_open = function(id, json)
+        local okj, doc = pcall(vim.json.decode, json or "")
+        local path = okj and type(doc) == "table" and doc.path or nil
+        local mode = (okj and type(doc) == "table" and doc.mode) or "wb"
+        if type(mode) ~= "string" or mode == "" then
+          mode = "wb"
+        end
+        if not mode:find("b", 1, true) then
+          mode = mode .. "b"
+        end
+        local fh, e = path and io.open(path, mode) or nil, nil
+        if not fh then
+          file_err = file_err or ("open_file 失败: " .. tostring(path) .. " (" .. tostring(e) .. ")")
+          vim.notify("AutoDbg: " .. file_err, vim.log.levels.ERROR)
+          files[id] = { failed = true }
+        else
+          files[id] = { fh = fh, path = path }
+        end
+      end,
+      on_data = function(id, data)
+        local f = files[id]
+        if f and f.fh then
+          f.fh:write(data)
+        end
+      end,
+      on_close = function(id)
+        local f = files[id]
+        if f and f.fh then
+          pcall(function()
+            f.fh:close()
+          end)
+          f.fh = nil
+        end
+      end,
+    }
+
+    local function done(resp)
+      -- 服务端没发 close 的句柄也收尾（否则客户端文件句柄泄漏）
+      for _, f in pairs(files) do
+        if f.fh then
+          pcall(function()
+            f.fh:close()
+          end)
+          f.fh = nil
+        end
+      end
+
+      local r = (resp and resp.result) or {}
+      local res = {
+        status = resp and resp.status or 0,
+        ok = resp ~= nil and resp.ok == true,
+        exit = nn(r.exit) or -1,
+        elapsed_ms = nn(r.elapsed_ms),
+        stdout = table.concat(outs),
+        stderr = table.concat(errs),
+        -- ❗结果帧里的 JSON `null` 会被解成 vim.NIL（真值 userdata）→ 必须过 nn()
+        error = (resp and resp.err) or nn(r.error),
+        truncated = r.truncated == true,
+        canceled = r.canceled == true,
+        timed_out = r.timed_out == true,
+        flavor = nn(r.flavor),
+        variant = nn(r.variant),
+        request_id = (type(r.server) == "table") and nn(r.server.request_id) or nil,
+        url = cfg.url,
+        url_mode = (cfg.modeline_hit and "modeline" or "setup"),
+        mode = "remote",
+        stream = true,
+        frames = resp and resp.frames or 0,
+        file_error = file_err,
+      }
+      return handle(res)
+    end
+
+    local req = { body = body, filename = file, format = cfg.format }
+    local stream_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, timeout_ms = cfg.timeout_ms }
+    if opts.sync then
+      local resp = stream.request(stream_cfg, req, handlers, nil, { sync = true, sync_timeout_ms = cfg.sync_timeout_ms })
+      return done(resp)
+    end
+    stream.request(stream_cfg, req, handlers, done, {})
+    return
+  end
+
+  -- ---------------- 远程模式：一次性 JSON + /effects（非流式） ----------------
   local headers = {
     ["Content-Type"] = "text/x-lua; charset=utf-8",
     ["X-AutoDbg-Filename"] = file,
