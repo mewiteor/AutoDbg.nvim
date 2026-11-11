@@ -354,7 +354,11 @@ function M.run(opts)
         local fh, e = path and io.open(path, mode) or nil, nil
         if not fh then
           file_err = file_err or ("open_file 失败: " .. tostring(path) .. " (" .. tostring(e) .. ")")
-          vim.notify("AutoDbg: " .. file_err, vim.log.levels.ERROR)
+          -- ❗on_open 跑在 uv 回调（fast event context）里，`vim.notify` 也要 schedule
+          local msg = "AutoDbg: " .. tostring(file_err)
+          vim.schedule(function()
+            vim.notify(msg, vim.log.levels.ERROR)
+          end)
           files[id] = { failed = true }
         else
           files[id] = { fh = fh, path = path }

@@ -50,8 +50,11 @@ end
 -- @param cfg   { url, token, token_header, timeout_ms }
 -- @param req   { body = Lua 源码, filename = chunkname, format = "json"|"text" }
 -- @param handlers { on_out(stream, data), on_open(id, json), on_data(id, data), on_close(id) }
+--   ❗handlers 也在 fast event context 里跑：里面只做纯 Lua / io.open 的事，
+--     任何 nvim API（notify/buffer/qflist…）都要自己 `vim.schedule`。
 -- @param on_done(resp)  resp = { ok, status, frames, result(json), err }
--- @return nil（异步）；`opts.sync` 时返回 resp
+--   已被 schedule 到主循环（可以直接调 nvim API）。
+-- @return nil（异步）；`opts.sync` 时返回 resp（同步路径由调用方在主循环里自己处理）
 function M.request(cfg, req, handlers, on_done, opts)
   opts = opts or {}
   handlers = handlers or {}
@@ -115,7 +118,11 @@ function M.request(cfg, req, handlers, on_done, opts)
       err = state.err,
     }
     if on_done then
-      on_done(resp)
+      -- ❗这里在 uv 读回调（fast event context）：不能直接碰 nvim API（会报 E5560），
+      --   统一 schedule 到主循环再交给调用方（顺序仍保证：schedule 是 FIFO）。
+      vim.schedule(function()
+        on_done(resp)
+      end)
     end
   end
 
