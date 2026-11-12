@@ -1,10 +1,13 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- nvim/plugin/autodbg.lua —— 命令与 autocmd 注册（runtimepath 里加载本目录即生效）
 --
 -- 命令：
 --   :AutoDbgRun [range]   执行当前 buffer / 选区（有 exe 就本地，否则远程）
---   :AutoDbgCancel        取消：本地模式杀进程，远程模式发 /cancel
---   :AutoDbgHealth        状态（本地报 exe/arch，远程打 /health）
+--   :AutoDbgCancel        取消当前脚本（硬 cancel）
+--   :AutoDbgKill          只结束当前 Attach/Run（软），脚本继续
+--   :AutoDbgDetach        真 detach：目标继续活着（NT+）
+--   :AutoDbgHealth        状态（本地报 exe/arch，远程问 server）
+--   :AutoDbgVersion       查 server 版本 / ABI（远程）
 --   :AutoDbgHeader [local|remote]  在 buffer 头部插入 `--!autodbg` 标记
 --   :AutoDbgLsp [on|off]  手动挂/摘 LuaLS 注解库（默认按脚本标记懒启用）
 --
@@ -31,11 +34,23 @@ end, { range = true, desc = "AutoDbg: 执行当前 buffer/选区（远程 server
 
 vim.api.nvim_create_user_command("AutoDbgCancel", function()
   require("autodbg").cancel()
-end, { desc = "AutoDbg: 取消正在执行的脚本" })
+end, { desc = "AutoDbg: 取消正在执行的脚本（硬）" })
+
+vim.api.nvim_create_user_command("AutoDbgKill", function()
+  require("autodbg").kill()
+end, { desc = "AutoDbg: 只结束当前 Attach/Run（软），脚本继续" })
+
+vim.api.nvim_create_user_command("AutoDbgDetach", function()
+  require("autodbg").detach()
+end, { desc = "AutoDbg: 真 detach，目标继续活着（NT+）" })
 
 vim.api.nvim_create_user_command("AutoDbgHealth", function()
   require("autodbg").health()
 end, { desc = "AutoDbg: 查看 server 状态" })
+
+vim.api.nvim_create_user_command("AutoDbgVersion", function()
+  require("autodbg").version()
+end, { desc = "AutoDbg: 查 server 版本 / ABI" })
 
 vim.api.nvim_create_user_command("AutoDbgHeader", function(o)
   local kind = vim.trim(o.args or "")
@@ -48,7 +63,7 @@ end, {
   complete = function()
     return { "remote", "local" }
   end,
-  desc = "AutoDbg: 插入 --!autodbg 标记（remote=url / local=exe+arch）",
+  desc = "AutoDbg: 插入 --!autodbg 标记（remote=host+port / local=exe+arch）",
 })
 
 vim.api.nvim_create_user_command("AutoDbgLsp", function(o)

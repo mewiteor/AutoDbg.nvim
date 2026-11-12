@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- nvim/lua/autodbg/modeline.lua —— 脚本头部的 AutoDbg 标记（modeline）
 --
 -- 来源：新写（与 AutoDbg 的 `--!lua` / `--!luajit` 首行标记同族）。
@@ -6,10 +6,10 @@
 --
 -- 语法（只看前 5 行与后 5 行，行必须是 `--` 注释；口径与 vim 的 modeline 一致）：
 --
---   --!autodbg url=http://192.168.1.10:8642 token=deadbeef     （远程模式）
+--   --!autodbg host=192.168.1.10 port=8642 token=deadbeef     （远程模式；raw TCP）
 --   --!autodbg exe=C:/tools/AutoDbg_64.exe arch=x64            （本地模式）
 --   --!autodbg host=192.168.1.10 port=8642
---   -- autodbg: url=http://127.0.0.1:8642      （modeline 风格也认）
+--   -- autodbg: host=127.0.0.1 port=8642      （modeline 风格也认）
 --   -- adbg: port=9000                        （短别名）
 --   --!autodbg                               （裸标记：只表示「这是 AutoDbg 脚本」）
 --
@@ -207,7 +207,7 @@ function M.is_autodbg_buf(bufnr)
   return M.from_buf(bufnr).found == true
 end
 
---- 把 modeline 里的 url/host/port 合到 setup 的默认 url 上
+--- 把 modeline 里的 url/host/port 合到 setup 的默认地址上（统一成 `host:port`，无 scheme）
 ---@param base_url string setup 里的默认地址
 ---@param ml table M.parse/from_buf 的结果
 ---@return string
@@ -216,17 +216,14 @@ function M.merge_url(base_url, ml)
     return base_url
   end
   if ml.url and ml.url ~= "" then
-    local url = ml.url
-    if not url:match("^%a[%w+.-]*://") then
-      url = "http://" .. url
-    end
-    return (url:gsub("/+$", ""))
+    -- 去掉可能残留的 scheme / 结尾斜杠，统一成 host:port（TCP 没有 scheme）
+    return (tostring(ml.url):gsub("^%a[%w+.-]*://", ""):gsub("/+$", ""))
   end
   if ml.host or ml.port then
     local _, host, port = tostring(base_url or ""):match("^(%a[%w+.-]*)://([^/:]+):?(%d*)")
     host = ml.host or host or "127.0.0.1"
     port = ml.port or (port ~= "" and port) or "8642"
-    return string.format("http://%s:%s", host, port)
+    return string.format("%s:%s", host, port)
   end
   return base_url
 end

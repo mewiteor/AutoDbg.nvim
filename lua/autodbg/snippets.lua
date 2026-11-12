@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- nvim/lua/autodbg/snippets.lua —— LuaSnip 片段（可选依赖，不硬绑定）
 --
 -- 来源：新写。LuaSnip 不存在时所有函数安静返回 nil（不报错、不影响插件其它功能）。
@@ -21,7 +21,7 @@
 --   adexcept  Run + exception_callback
 --   adgui     gui.find + gui.screenshot（把界面拍下来给 AI 看）
 --   adclick   gui.activate + gui.click
---   adfile    read_file / write_file（读写**本机**文件）
+--   adfile    open_file 读**本机**文件（remote 模式下是客户端那台机器）
 -- =============================================================================
 
 local M = {}
@@ -180,13 +180,16 @@ function M.get()
     i(0, ""),
   })
 
-  list[#list + 1] = s({ trig = "adfile", dscr = "AutoDbg: 一次性读写客户端文件（小数据、非流式）" }, {
-    t("local data, err = read_file("),
-    i(1, '"C:\\\\tmp\\\\in.bin"'),
-    t(")"),
-    t({ "", 'write_file("' }),
-    i(2, "C:\\\\tmp\\\\out.bin"),
-    t({ '", data, "wb")' }),
+  -- T5（D44）：`read_file` / `write_file` 已删除 —— 文件 I/O 只有 `open_file` 的文件对象
+  list[#list + 1] = s({ trig = "adfile", dscr = "AutoDbg: open_file 读本机文件（remote 模式下读的是客户端那台）" }, {
+    t({ 'local f, e = open_file("' }),
+    i(1, 'C:\\\\tmp\\\\in.txt'),
+    t({ '", "rb")' }),
+    t({ "", "if not f then return nil, e end" }),
+    t({ "", "for line in f:lines() do" }),
+    t({ "", "  print(line)" }),
+    t({ "", "end" }),
+    t({ "", "f:close()" }),
     i(0, ""),
   })
 

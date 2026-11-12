@@ -1,9 +1,9 @@
 ---@meta
 -- ---------------------------------------------------------------------------
--- AutoDbg.nvim —— LuaLS 注解：烘焙进模块的 Lua 库（jsonx / inspect / moses，另含内部 effects / mcp）
+-- AutoDbg.nvim —— LuaLS 注解：烘焙进模块的 Lua 库（jsonx / inspect / moses）
 --
 -- 来源：由 AutoDbg 模块（迁移前）的 generate_templete() 模板原样迁入；
---   之后新增的 API 见 lualib.lua（effects / mcp）与 file_io.lua（read_file / write_file）。
+--   文件 I/O 见 file_io.lua（`open_file` 的文件对象；T5 之后 read_file/write_file 已删）。
 -- 不要 require 本文件：它只给 lua_ls 看（首行 ---@meta）。
 -- ---------------------------------------------------------------------------
 
@@ -300,13 +300,6 @@ inspect = nil
 ---@type MosesLib
 moses = nil
 
---------------------------------------------------------------------- 内部烘焙库（脚本一般不直接用）
----@class EffectsLib 客户端文件 I/O 的效果还原（server 侧 `lualib/effects.lua`）
----@field unpack fun(json_text: string): table?
----@type EffectsLib
-effects = nil
-
----@class McpLib MCP 的 JSON-RPC 分发（server 侧 `lualib/mcp.lua`）
----@field dispatch fun(body: string): string
----@type McpLib
-mcp = nil
+--------------------------------------------------------------------- 已删除（T5 / D41+D44）
+-- `effects`（客户端文件 I/O 效果协议）与 `mcp`（JSON-RPC 分发）两个全局随 HTTP/MCP 一起删除；
+-- 文件 I/O 现在只有 `open_file` 的文件对象（见 file_io.lua）。

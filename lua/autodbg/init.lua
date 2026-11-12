@@ -2,28 +2,27 @@
 -- nvim/lua/autodbg/init.lua —— neovim 客户端主入口
 --
 -- 用法（依赖为零，把本目录加到 runtimepath 即可）：
---   require("autodbg").setup({ url = "http://127.0.0.1:8642" })
+--   require("autodbg").setup({ host = "127.0.0.1", port = 8642 })
 --   :AutoDbgRun            " 当前 buffer 整段执行
 --   :'<,'>AutoDbgRun       " 只执行选区
---   :AutoDbgCancel         " 取消正在跑的脚本
+--   :AutoDbgCancel         " 取消正在跑的脚本（硬）
+--   :AutoDbgKill           " 只结束当前 Attach/Run（软），脚本继续
+--   :AutoDbgDetach         " 真 detach：目标继续活着（NT+）
 --   :AutoDbgHealth         " 看一眼 server 状态
---   :AutoDbgHeader         " 在 buffer 头部插入 `--!autodbg` 标记（含远程地址）
+--   :AutoDbgVersion        " 查 server 版本 / ABI
+--   :AutoDbgHeader         " 在 buffer 头部插入 `--!autodbg` 标记
 --   :AutoDbgLsp [on|off]   " 手动挂/摘 LuaLS 注解库
--- 结果：写到 scratch buffer（`exit/elapsed` + stdout + stderr），并把 `<file>:<line>:`
---   形式的错误行塞进 quickfix（`:copen` / `]q` 可直达脚本出错行）。
+-- 结果：写到 scratch buffer，并把 `<file>:<line>:` 形式的错误行塞进 quickfix。
 --
--- 远程地址有两层（后者覆盖前者）：
---   ① `setup{ url = ... }` / `token` / token_file / $AUTODBG_TOKEN —— 默认值；
---   ② 脚本头部的标记行（`--!autodbg url=http://host:port token=…`，见 modeline.lua）。
--- 与 server 的契约见 AGENTS.md §12：body = Lua 源码，`X-AutoDbg-Filename`
---   作为 chunkname（所以错误信息里带的是你的缓冲区文件名）。
+-- 传输：**raw TCP 帧**（`lua/autodbg/tcp.lua`）；HTTP / effects / chunked 已删除。
+-- 地址有两层（后者覆盖前者）：
+--   ① `setup{ host/port/url/token }` / `token_file` / `$AUTODBG_TOKEN` —— 默认值；
+--   ② 脚本头部的标记行（`--!autodbg host=… port=… token=… pid=…`，见 modeline.lua）。
 -- =============================================================================
 
-local effects = require("autodbg.effects")
-local http = require("autodbg.http")
 local modeline = require("autodbg.modeline")
 local run_local = require("autodbg.local")
-local stream = require("autodbg.stream")
+local tcp = require("autodbg.tcp")
 local ui = require("autodbg.ui")
 
 --- 已经提示过「标记的 exe 不存在」的 buffer（避免反复刷屏）
@@ -33,21 +32,21 @@ local warned_local = {}
 local M = {}
 
 M.config = {
-  url = "http://127.0.0.1:8642",
+  host = "127.0.0.1",
+  port = 8642,
+  url = nil,            -- 兼容旧配置：`url = "http://h:p"` / `"tcp://h:p"` 也会被解析成 host/port
   token = nil,          -- 显式 token；nil 时看 $AUTODBG_TOKEN / token_file
-  token_header = "Authorization",
   token_file = nil,     -- 第一行作为 token
-  curl = "curl",
-  format = "json",      -- "json"（信息全）| "text"（只 stdout）
-  timeout_ms = 0,       -- curl --max-time（毫秒，0 = 不设）
-  sync_timeout_ms = 60000,
+  timeout_ms = 0,       -- 本地模式：子进程上限（远程模式忽略）
+  sync_timeout_ms = 0,  -- 远程模式「等结果」上限（0 = 一直等）
+  read_timeout_ms = 5000,  -- 一次文件操作（服务端等客户端回包）的上限
   open = "split",       -- "split" | "vsplit" | "float" | "none"
   focus = true,
   keymaps = {
     run = nil,          -- 例如 "<leader>dr"
     cancel = nil,       -- 例如 "<leader>dc"
   },
-  -- 脚本头部的 `--!autodbg ...` 标记（远程地址 / LSP 开关的依据）
+  -- 脚本头部的 `--!autodbg ...` 标记（地址 / token / pid / LSP 开关的依据）
   modeline = {
     enable = true,
     head = 5,           -- 看前 N 行
@@ -59,8 +58,6 @@ M.config = {
   exe = nil,
   exe_names = nil,      -- 默认 { "AutoDbg_64.exe", "AutoDbg_86.exe", "AutoDbg.exe", "autodbg.exe" }
   local_flags = { "--quiet" },  -- 本地模式的固定参数（--quiet 关错误弹窗，免 headless 被 MessageBox 挂住）
-  -- 远程模式用**流式**响应（帧 + chunked）：`open_file`/`f:write` 才能边跑边写
-  stream = true,
   -- 把 LuaLS 注解库挂到 lua_ls（取代 AutoDbg 模块的 generate_templete）
   lsp = {
     enable = true,
@@ -142,6 +139,16 @@ local function effective(over, bufnr)
     return cfg, nil
   end
   cfg.url = modeline.merge_url(cfg.url, ml)
+  -- 标记里的 host/port 优先（`url=` 会被 merge_url 归一成 `host:port`）
+  if ml.host and ml.host ~= "" then
+    cfg.host = ml.host
+  end
+  if ml.port and tonumber(ml.port) then
+    cfg.port = tonumber(ml.port)
+  end
+  if ml.pid and tonumber(ml.pid) then
+    cfg.pid = tonumber(ml.pid)
+  end
   if ml.token and ml.token ~= "" then
     cfg.token = ml.token
   end
@@ -178,70 +185,6 @@ end
 
 local function notify_err(msg)
   vim.notify("AutoDbg: " .. msg, vim.log.levels.ERROR)
-end
-
---- 把 server 的响应整理成统一结果表
-local function nn(v)
-  -- ❗`vim.json.decode` 把 JSON `null` 解成 `vim.NIL`（userdata，且为真值）——
-  -- 不归一化的话 `"error": null` 会被当成「有错误」并在拼接时炸（S3 踩过）。
-  if v == vim.NIL then
-    return nil
-  end
-  return v
-end
-
-local function to_result(cfg, resp, extra)
-  local res = {
-    status = resp.status,
-    elapsed_ms = nil,
-    stdout = "",
-    stderr = "",
-    error = nil,
-    -- 实际用的地址与**地址来源**（setup 默认值 / 脚本头部标记），失败分支也要带着它
-    url = cfg.url,
-    url_mode = (cfg.modeline_hit and "modeline" or "setup"),
-  }
-
-  if resp.err then
-    res.ok = false
-    res.exit = -1
-    res.error = resp.err
-    res.stderr = resp.body or ""
-    return res
-  end
-
-  if cfg.format == "text" then
-    res.ok = (resp.status == 200)
-    res.exit = tonumber(resp.headers["x-autodbg-exit"] or "-1")
-    res.stdout = resp.body or ""
-    res.truncated = (resp.headers["x-autodbg-truncated"] == "1")
-    res.canceled = (resp.headers["x-autodbg-canceled"] == "1")
-    res.timed_out = (resp.headers["x-autodbg-timed-out"] == "1")
-    return res
-  end
-
-  local decoded_ok, decoded = pcall(vim.json.decode, resp.body or "")
-  if not decoded_ok or type(decoded) ~= "table" then
-    -- server 返回的不是 JSON（多半是 4xx/5xx 的纯文本）
-    res.ok = false
-    res.exit = -1
-    res.error = (resp.body or ""):sub(1, 2000)
-    return res
-  end
-
-  res.ok = (resp.status == 200) and (decoded.ok == true) and ((decoded.exit or 0) == 0)
-  res.exit = decoded.exit or -1
-  res.elapsed_ms = nn(decoded.elapsed_ms)
-  res.stdout = nn(decoded.stdout) or ""
-  res.stderr = nn(decoded.stderr) or ""
-  res.error = nn(decoded.error)
-  res.truncated = decoded.truncated == true
-  res.canceled = decoded.canceled == true
-  res.timed_out = decoded.timed_out == true
-  res.flavor = nn(decoded.flavor)
-  res.variant = nn(decoded.variant)
-  res.request_id = (decoded.server and nn(decoded.server.request_id)) or extra.request_id
-  return res
 end
 
 local function show(cfg, res, file)
@@ -328,145 +271,22 @@ function M.run(opts)
     })
   end
 
-  -- ---------------- 远程模式：流式（帧 + chunked） ----------------
-  -- `open_file`/`f:write` 只有在流式请求里才能用（脚本线程直接写这条连接），
-  -- 所以默认走流式；`setup{ stream = false }` 回退到老的一次性 JSON + /effects。
-  if cfg.stream then
-    local outs, errs = {}, {}
-    local files = {}          -- id → { fh, path }
-    local file_err = nil
-
-    local handlers = {
-      on_out = function(which, data)
-        local t = (which == 2) and errs or outs
-        t[#t + 1] = data
-      end,
-      on_open = function(id, json)
-        local okj, doc = pcall(vim.json.decode, json or "")
-        local path = okj and type(doc) == "table" and doc.path or nil
-        local mode = (okj and type(doc) == "table" and doc.mode) or "wb"
-        if type(mode) ~= "string" or mode == "" then
-          mode = "wb"
-        end
-        if not mode:find("b", 1, true) then
-          mode = mode .. "b"
-        end
-        local fh, e = path and io.open(path, mode) or nil, nil
-        if not fh then
-          file_err = file_err or ("open_file 失败: " .. tostring(path) .. " (" .. tostring(e) .. ")")
-          -- ❗on_open 跑在 uv 回调（fast event context）里，`vim.notify` 也要 schedule
-          local msg = "AutoDbg: " .. tostring(file_err)
-          vim.schedule(function()
-            vim.notify(msg, vim.log.levels.ERROR)
-          end)
-          files[id] = { failed = true }
-        else
-          files[id] = { fh = fh, path = path }
-        end
-      end,
-      on_data = function(id, data)
-        local f = files[id]
-        if f and f.fh then
-          f.fh:write(data)
-        end
-      end,
-      on_close = function(id)
-        local f = files[id]
-        if f and f.fh then
-          pcall(function()
-            f.fh:close()
-          end)
-          f.fh = nil
-        end
-      end,
-    }
-
-    local function done(resp)
-      -- 服务端没发 close 的句柄也收尾（否则客户端文件句柄泄漏）
-      for _, f in pairs(files) do
-        if f.fh then
-          pcall(function()
-            f.fh:close()
-          end)
-          f.fh = nil
-        end
-      end
-
-      local r = (resp and resp.result) or {}
-      local res = {
-        status = resp and resp.status or 0,
-        ok = resp ~= nil and resp.ok == true,
-        exit = nn(r.exit) or -1,
-        elapsed_ms = nn(r.elapsed_ms),
-        stdout = table.concat(outs),
-        stderr = table.concat(errs),
-        -- ❗结果帧里的 JSON `null` 会被解成 vim.NIL（真值 userdata）→ 必须过 nn()
-        error = (resp and resp.err) or nn(r.error),
-        truncated = r.truncated == true,
-        canceled = r.canceled == true,
-        timed_out = r.timed_out == true,
-        flavor = nn(r.flavor),
-        variant = nn(r.variant),
-        request_id = (type(r.server) == "table") and nn(r.server.request_id) or nil,
-        url = cfg.url,
-        url_mode = (cfg.modeline_hit and "modeline" or "setup"),
-        mode = "remote",
-        stream = true,
-        frames = resp and resp.frames or 0,
-        file_error = file_err,
-      }
-      return handle(res)
-    end
-
-    local req = { body = body, filename = file, format = cfg.format }
-    local stream_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, timeout_ms = cfg.timeout_ms }
-    if opts.sync then
-      local resp = stream.request(stream_cfg, req, handlers, nil, { sync = true, sync_timeout_ms = cfg.sync_timeout_ms })
-      return done(resp)
-    end
-    stream.request(stream_cfg, req, handlers, done, {})
-    return
+  -- ---------------- 远程模式：raw TCP 帧（T5：HTTP/effects/chunked 已删） ----------------
+  -- 一次调用 = 一条连接：握手 → `script` 帧 → `out` / `open`+`data`+`close` /
+  -- `read_req`（tcp.lua 回 `read_resp`）→ `result` + `end`。文件 I/O 在**本机**。
+  local function done_remote(r)
+    r = r or { ok = false, exit = -1, error = "no response" }
+    r.mode = "remote"
+    r.url = cfg.url
+    r.url_mode = (cfg.modeline_hit and "modeline" or "setup")
+    r.host, r.port = tcp.endpoint(cfg)
+    return handle(r)
   end
 
-  -- ---------------- 远程模式：一次性 JSON + /effects（非流式） ----------------
-  local headers = {
-    ["Content-Type"] = "text/x-lua; charset=utf-8",
-    ["X-AutoDbg-Filename"] = file,
-  }
-  if cfg.format == "text" then
-    headers["X-AutoDbg-Format"] = "text"
-  end
-
-  local req_cfg = {
-    url = cfg.url,
-    token = resolve_token(cfg),
-    token_header = cfg.token_header,
-    curl = cfg.curl,
-    timeout_ms = cfg.timeout_ms,
-    sync_timeout_ms = cfg.sync_timeout_ms,
-  }
-
-  local function handle_remote(resp)
-    local res = to_result(cfg, resp, {})
-    res.mode = "remote"
-    return handle(res)
-  end
-  local resp = http.request(req_cfg, {
-    method = "POST",
-    path = "/run",
-    body = body,
-    headers = headers,
-    sync = opts.sync,
-  }, opts.sync and nil or function(r)
-    -- S7：脚本可能要求改/读**本机**文件 → server 会挂起，这里把效果做完再送回
-    effects.resolve(req_cfg, r, function(final_resp)
-      handle_remote(final_resp)
-    end)
-  end)
-
+  local rr = tcp.run(cfg, { body = body, filename = file }, {}, opts.sync and nil or done_remote,
+    { sync = opts.sync, sync_timeout_ms = cfg.sync_timeout_ms })
   if opts.sync then
-    resp = effects.resolve_sync(req_cfg, resp)
-    return handle_remote(resp)
+    return done_remote(rr)
   end
 end
 
@@ -496,7 +316,7 @@ function M.resolve_mode(cfg)
   return "remote", nil, "no-exe"
 end
 
---- 取消正在跑的那一次执行（本地模式 kill 进程；远程模式发 `/cancel`）
+--- 取消正在跑的那一次执行（本地模式 kill 进程；远程模式发 `control` 的 cancel）
 function M.cancel(opts)
   opts = opts or {}
   local bufnr = vim.api.nvim_get_current_buf()
@@ -510,17 +330,48 @@ function M.cancel(opts)
     vim.notify(killed and "AutoDbg: 已终止本地进程" or "AutoDbg: 当前没有在跑的本地进程", vim.log.levels.INFO)
     return
   end
-  local req_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, curl = cfg.curl }
-  local resp = http.request(req_cfg, { method = "POST", path = "/cancel", sync = opts.sync or true })
-  local ok, decoded = pcall(vim.json.decode, resp.body or "")
-  local accepted = ok and type(decoded) == "table" and decoded.accepted == true
+  local reply = tcp.control(cfg, "cancel", { sync_timeout_ms = cfg.sync_timeout_ms })
+  local accepted = reply ~= nil and reply.applied == true
   if opts.sync then
     return accepted
   end
-  vim.notify(accepted and "AutoDbg: 已请求取消" or "AutoDbg: 当前没有正在执行的脚本", vim.log.levels.INFO)
+  local why = reply and reply.json and reply.json.reason or nil
+  vim.notify(accepted and "AutoDbg: 已请求取消" or ("AutoDbg: 当前没有正在执行的脚本（" .. tostring(why) .. "）"), vim.log.levels.INFO)
 end
 
---- 查看状态（本地模式报 exe/arch，远程模式打 `/health`；同样尊重当前 buffer 的标记）
+--- 软动作：只结束**当前** `Attach`/`Run`，脚本继续跑
+local function soft_action(kind, opts)
+  opts = opts or {}
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = effective(opts.cfg, bufnr)
+  if M.resolve_mode(cfg) == "local" then
+    local killed = run_local.cancel()
+    if opts.sync then
+      return killed
+    end
+    vim.notify(killed and "AutoDbg: 已终止本地进程" or "AutoDbg: 当前没有在跑的本地进程", vim.log.levels.INFO)
+    return
+  end
+  local reply = tcp.control(cfg, kind, { sync_timeout_ms = cfg.sync_timeout_ms })
+  local applied = reply ~= nil and reply.applied == true
+  if opts.sync then
+    return applied
+  end
+  local why = reply and reply.json and reply.json.reason or nil
+  vim.notify(string.format("AutoDbg --%s: %s（%s）", kind, applied and "已生效" or "未生效", tostring(why)), vim.log.levels.INFO)
+end
+
+--- 只结束当前的 `Attach`/`Run`（我们启动的目标会被终止），脚本继续
+function M.kill(opts)
+  return soft_action("kill", opts)
+end
+
+--- 真 detach：目标存活、pid 不变（NT+；Win9x 降级成 kill）
+function M.detach(opts)
+  return soft_action("detach", opts)
+end
+
+--- 查看状态（本地模式报 exe/arch，远程模式问 server）
 function M.health(opts)
   opts = opts or {}
   local bufnr = vim.api.nvim_get_current_buf()
@@ -538,20 +389,54 @@ function M.health(opts)
     return res
   end
 
-  local req_cfg = { url = cfg.url, token = resolve_token(cfg), token_header = cfg.token_header, curl = cfg.curl }
-  local resp = http.request(req_cfg, { method = "GET", path = "/health", sync = true })
-  resp.url = cfg.url
-  resp.mode = "remote"
-  resp.url_mode = (cfg.modeline_hit and "modeline" or "setup")
-  resp.fallback = why and why:match("^missing:") and why or nil
+  local reply = tcp.control(cfg, "health", { sync_timeout_ms = cfg.sync_timeout_ms })
+  local host, port = tcp.endpoint(cfg)
+  local res = {
+    ok = reply ~= nil and reply.type == "info",
+    status = (reply and reply.type == "error") and 0 or 200,
+    body = reply and reply.json and vim.json.encode(reply.json) or (reply and reply.error) or "",
+    info = reply and reply.json or nil,
+    mode = "remote",
+    host = host,
+    port = port,
+    url = cfg.url,
+    url_mode = (cfg.modeline_hit and "modeline" or "setup"),
+    fallback = why and why:match("^missing:") and why or nil,
+  }
   if opts.sync then
-    return resp
+    return res
   end
-  if resp.status == 200 then
-    vim.notify(string.format("AutoDbg /health (%s): %s", cfg.url, resp.body or ""), vim.log.levels.INFO)
+  if res.ok then
+    local j = res.info or {}
+    vim.notify(string.format("AutoDbg %s:%d（proto=%s busy=%s）", host, port, tostring(j.proto), tostring(j.busy)), vim.log.levels.INFO)
   else
-    notify_err("health 失败（" .. tostring(cfg.url) .. "，status=" .. tostring(resp.status) .. "）")
+    notify_err("health 失败（" .. host .. ":" .. port .. "）：" .. tostring(res.body))
   end
+end
+
+--- 查 server 版本 / ABI（远程模式）
+function M.version(opts)
+  opts = opts or {}
+  local bufnr = vim.api.nvim_get_current_buf()
+  local cfg = effective(opts.cfg, bufnr)
+  local reply = tcp.control(cfg, "version", { sync_timeout_ms = cfg.sync_timeout_ms })
+  local res = {
+    ok = reply ~= nil and reply.type == "info",
+    info = reply and reply.json or nil,
+    error = reply and reply.error or nil,
+    mode = "remote",
+  }
+  if opts.sync then
+    return res
+  end
+  if res.ok then
+    local j = res.info or {}
+    vim.notify(string.format("AutoDbg server %s（abi %s, %s, %s/%s）", tostring(j.version), tostring(j.abi),
+      tostring(j.arch), tostring(j.flavor), tostring(j.variant)), vim.log.levels.INFO)
+  else
+    notify_err("version 失败：" .. tostring(res.error))
+  end
+  return res
 end
 
 --- 当前 buffer 的标记（没标记返回 { found = false }）
@@ -562,7 +447,7 @@ function M.marker(bufnr)
 end
 
 --- 在 buffer 头部插入 `--!autodbg` 标记（没 LuaSnip 也能用；已有标记就只提示）
--- opts.kind："remote"（默认，url=…）| "local"（exe=… arch=…）
+-- opts.kind："remote"（默认，host=… port=…）| "local"（exe=… arch=…）
 ---@param opts? { bufnr: integer?, force: boolean?, kind: string? }
 ---@return boolean ok
 function M.insert_header(opts)
@@ -585,7 +470,8 @@ function M.insert_header(opts)
       vim.notify("AutoDbg: PATH 里没找到 AutoDbg 的 exe；标记里只写了 arch（请自己补 exe=…）", vim.log.levels.WARN)
     end
   else
-    line = "--!autodbg url=" .. tostring(cfg.url)
+    local host, port = tcp.endpoint(cfg)
+    line = string.format("--!autodbg host=%s port=%d", host, port)
   end
   vim.api.nvim_buf_set_lines(bufnr, 0, 0, false, { line })
   vim.notify("AutoDbg: 已插入标记 " .. line, vim.log.levels.INFO)
