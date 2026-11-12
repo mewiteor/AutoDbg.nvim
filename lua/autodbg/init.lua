@@ -1,4 +1,4 @@
-﻿-- =============================================================================
+-- =============================================================================
 -- nvim/lua/autodbg/init.lua —— neovim 客户端主入口
 --
 -- 用法（依赖为零，把本目录加到 runtimepath 即可）：
@@ -32,9 +32,11 @@ local warned_local = {}
 local M = {}
 
 M.config = {
-  host = "127.0.0.1",
-  port = 8642,
-  url = nil,            -- 兼容旧配置：`url = "http://h:p"` / `"tcp://h:p"` 也会被解析成 host/port
+  -- ❗默认地址**不写在这里**：留在 nil，让 `modeline` / `url` 有机会生效；
+  -- 真正的缺省值由 `tcp.endpoint()` 补（127.0.0.1:8642）。
+  host = nil,
+  port = nil,
+  url = nil,            -- 兼容旧配置：`url = "http://h:p"` / `"tcp://h:p"` / `"h:p"` 都会拆成 host/port
   token = nil,          -- 显式 token；nil 时看 $AUTODBG_TOKEN / token_file
   token_file = nil,     -- 第一行作为 token
   timeout_ms = 0,       -- 本地模式：子进程上限（远程模式忽略）
@@ -138,8 +140,12 @@ local function effective(over, bufnr)
   if not ml.found then
     return cfg, nil
   end
+  -- 标记里的地址 **优先于** setup 的默认值：`url=` / `host=` / `port=` 任一出现就算「指定过地址」，
+  -- 先把 setup 那层的 host/port 清掉（否则 setup 里的 127.0.0.1 会把 modeline 的 url 盖住）。
+  if (ml.url and ml.url ~= "") or ml.host or ml.port then
+    cfg.host, cfg.port = nil, nil
+  end
   cfg.url = modeline.merge_url(cfg.url, ml)
-  -- 标记里的 host/port 优先（`url=` 会被 merge_url 归一成 `host:port`）
   if ml.host and ml.host ~= "" then
     cfg.host = ml.host
   end
