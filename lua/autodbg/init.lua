@@ -40,7 +40,7 @@ M.config = {
   token = nil,          -- 显式 token；nil 时看 $AUTODBG_TOKEN / token_file
   token_file = nil,     -- 第一行作为 token
   timeout_ms = 0,       -- 本地模式：子进程上限（远程模式忽略）
-  sync_timeout_ms = 0,  -- 远程模式「等结果」上限（0 = 一直等）
+  sync_timeout_ms = 0,  -- 远程模式「等脚本结果」上限（0 = 一直等；控制命令另有 5 s 默认）
   read_timeout_ms = 5000,  -- 一次文件操作（服务端等客户端回包）的上限
   open = "split",       -- "split" | "vsplit" | "float" | "none"
   focus = true,

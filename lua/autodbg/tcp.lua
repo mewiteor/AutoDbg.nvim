@@ -151,8 +151,22 @@ local function decode_json(s)
   return nil
 end
 
-local function close(tcp)
-  if tcp then
+--- 等到 `cond()` 为真。
+--- ❗`vim.wait(0, cond)` **不是**「一直等」，而是「不等待，立刻返回 false」——
+---   默认配置就是 `sync_timeout_ms = 0`，直接用会把每条请求都变成「1 ms 后超时」。
+---   `ms <= 0` 在这里表示「一直等」：分片循环，连接断开时 `finish` 会把 cond 置真。
+local function wait_until(cond, ms)
+  ms = tonumber(ms) or 0
+  if ms > 0 then
+    return vim.wait(ms, cond, 20)
+  end
+  while not cond() do
+    vim.wait(200, cond, 20)
+  end
+  return true
+end
+
+local function close(tcp)  if tcp then
     pcall(function()
       tcp:close()
     end)
@@ -419,9 +433,9 @@ function M.run(cfg, req, handlers, done, opts)
   end)
 
   if opts.sync then
-    vim.wait(opts.sync_timeout_ms or cfg.sync_timeout_ms or 0, function()
+    wait_until(function()
       return finished
-    end, 20)
+    end, opts.sync_timeout_ms or cfg.sync_timeout_ms)
     if not finished then
       finish("等待 server 响应超时")
     end
@@ -481,9 +495,13 @@ function M.control(cfg, name, opts)
     end)
   end)
 
-  vim.wait(opts.sync_timeout_ms or 5000, function()
+  local wait_ms = tonumber(opts.sync_timeout_ms) or 0
+  if wait_ms <= 0 then
+    wait_ms = 5000   -- 控制命令很短；这里 0 当「用默认」，不是「永远等」
+  end
+  wait_until(function()
     return finished
-  end, 20)
+  end, wait_ms)
   return reply or { type = "error", applied = false, error = "timeout" }
 end
 
