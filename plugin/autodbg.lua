@@ -8,6 +8,7 @@
 --   :AutoDbgDetach        真 detach：目标继续活着（NT+）
 --   :AutoDbgHealth        状态（本地报 exe/arch，远程问 server）
 --   :AutoDbgVersion       查 server 版本 / ABI（远程）
+--   :AutoDbgRepl          连**已经在跑的** `--repl --server`（只走远程；headless 用 M.repl_open/eval/close）
 --   :AutoDbgHeader [local|remote]  在 buffer 头部插入 `--!autodbg` 标记
 --   :AutoDbgLsp [on|off]  手动挂/摘 LuaLS 注解库（默认按脚本标记懒启用）
 --
@@ -51,6 +52,10 @@ end, { desc = "AutoDbg: 查看 server 状态" })
 vim.api.nvim_create_user_command("AutoDbgVersion", function()
   require("autodbg").version()
 end, { desc = "AutoDbg: 查 server 版本 / ABI" })
+
+vim.api.nvim_create_user_command("AutoDbgRepl", function()
+  require("autodbg").repl()
+end, { desc = "AutoDbg: 连已经在跑的 --repl --server（只走远程，不 spawn 进程）" })
 
 vim.api.nvim_create_user_command("AutoDbgHeader", function(o)
   local kind = vim.trim(o.args or "")

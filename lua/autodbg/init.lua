@@ -10,6 +10,7 @@
 --   :AutoDbgDetach         " 真 detach：目标继续活着（NT+）
 --   :AutoDbgHealth         " 看一眼 server 状态
 --   :AutoDbgVersion        " 查 server 版本 / ABI
+--   :AutoDbgRepl           " 连**已经在跑的** `--repl --server`（只走远程，不 spawn 进程）
 --   :AutoDbgHeader         " 在 buffer 头部插入 `--!autodbg` 标记
 --   :AutoDbgLsp [on|off]   " 手动挂/摘 LuaLS 注解库
 -- 结果：写到 scratch buffer，并把 `<file>:<line>:` 形式的错误行塞进 quickfix。
@@ -18,12 +19,15 @@
 -- 地址有两层（后者覆盖前者）：
 --   ① `setup{ host/port/url/token }` / `token_file` / `$AUTODBG_TOKEN` —— 默认值；
 --   ② 脚本头部的标记行（`--!autodbg host=… port=… token=… pid=…`，见 modeline.lua）。
+-- ❗REPL（`:AutoDbgRepl` / `M.repl_open`）只走远程：D39 的「本地优先」不适用于它 ——
+--   拿不到地址就明确报错，不回落到本地 exe。可编程面：`M.repl_open` / `M.repl_eval` / `M.repl_close`。
 -- =============================================================================
 
 local modeline = require("autodbg.modeline")
 local run_local = require("autodbg.local")
 local tcp = require("autodbg.tcp")
 local ui = require("autodbg.ui")
+local repl = require("autodbg.repl")
 
 --- 已经提示过「标记的 exe 不存在」的 buffer（避免反复刷屏）
 ---@type table<string, boolean>
@@ -69,6 +73,12 @@ M.config = {
   -- LuaSnip 片段（检测不到 LuaSnip 时安静跳过）
   snippets = {
     enable = true,
+  },
+  -- `:AutoDbgRepl` / `M.repl_open`：连**已经在跑的** `--repl --server`（协议 2，只走远程）
+  repl = {
+    buffer = "autodbg:repl",   -- 渲染用的 scratch buffer（与 run 的结果 buffer 是两块）
+    read_timeout_ms = 5000,    -- 一行命令等回包的上限（沿用插件现有默认；0 = 一直等）
+    event_summary = true,      -- `event` 帧（16）渲染成一行摘要；false = 不渲染（仍然计数）
   },
 }
 
@@ -441,6 +451,79 @@ function M.version(opts)
       tostring(j.arch), tostring(j.flavor), tostring(j.variant)), vim.log.levels.INFO)
   else
     notify_err("version 失败：" .. tostring(res.error))
+  end
+  return res
+end
+
+--- REPL 只认两个地址来源（脚本头标记 / setup）：拿不到就明确报错 —— 不拿缺省地址兜底，
+--- 也不静默回落到本地 exe（D39 的「本地优先」不适用于 REPL）。
+local function repl_addr_err(cfg)
+  if not (cfg.host or cfg.port or cfg.url) then
+    return "REPL 只走远程：需要脚本头标记的 `host=`/`port=`（或 setup{ host/port/url }）"
+  end
+  return nil
+end
+
+--- 连一条**已经在跑的** `--repl --server`（headless 门禁的驱动面：`input()` 不可用时走这三个）
+---@param opts? { cfg: table?, bufnr: integer?, sync: boolean?, on_open: fun(res) }
+---@return table res
+function M.repl_open(opts)
+  opts = opts or {}
+  local cfg = effective(opts.cfg, opts.bufnr)
+  local err = repl_addr_err(cfg)
+  if err then
+    notify_err(err)
+    return { ok = false, mode = "remote", error = err }
+  end
+  local res = repl.open(cfg, opts)
+  if res and not res.ok then
+    notify_err(res.error)
+  end
+  return res
+end
+
+--- 跑一行（或一个完整块）：一条 `script` 帧，`id` = 插件侧递增的命令号。
+-- 返回 { cmd, line, ok, code, out, err, outs, events, error }：`code` 是 `result` 帧的 `id`
+-- （**该行的 Lua 错误码**，不是命令号），`out` / `events` 都按 `id` 归因到本条命令。
+---@param line string
+---@param opts? { sync: boolean?, sync_timeout_ms: number?, on_line: fun(res) }
+---@return table|nil res
+function M.repl_eval(line, opts)
+  opts = opts or {}
+  local res, err = repl.eval(line, opts)
+  if err then
+    notify_err(err)
+    return nil
+  end
+  return res
+end
+
+--- 关掉这条 REPL 连接（server 侧随之 `repl_server_end`：未关的会话按归属收尾）
+---@return table|nil res
+function M.repl_close()
+  local res, err = repl.close()
+  if err then
+    notify_err(err)
+    return nil
+  end
+  return res
+end
+
+--- `:AutoDbgRepl` 的交互外壳：真 TUI 里 `input()` 循环；headless 下明确报错（不 hang）
+---@param opts? { cfg: table?, bufnr: integer? }
+---@return table|nil res
+function M.repl(opts)
+  opts = opts or {}
+  local cfg = effective(opts.cfg, opts.bufnr)
+  local err = repl_addr_err(cfg)
+  if err then
+    notify_err(err)
+    return nil
+  end
+  local res, rerr = repl.shell(cfg, opts)
+  if rerr then
+    notify_err(rerr)
+    return nil
   end
   return res
 end

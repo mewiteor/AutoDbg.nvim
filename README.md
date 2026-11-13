@@ -56,7 +56,7 @@ AutoDbg_<arch>.exe        zero-CRT launcher → payload (single LZMA stream) →
 - **GUI automation**: `gui.position/move/click/write/press`, `gui.windows/find/activate/rect/children`, `gui.text/set_text/post/send`, `gui.screenshot` (PNG), `gui.pick()` to resolve the pid under the mouse on the target machine.
 - **Client-side file I/O**: `open_file()` returns an io-style file object; in remote mode the bytes live on the *client's* disk (binary-safe frames). `f:read()` blocks inside debug callbacks with a timeout (`nil, "timeout"`) instead of failing the session.
 - **Machine-readable results**: `--json` / `--out=<path>` emit one ASCII JSON envelope — `ok`, `exit`, `canceled`, `detached`, `pid`, `stdout`, `stderr`, `images`, `result` (the script's `return` value).
-- **Editor integration**: neovim plugin with `:AutoDbgRun` (buffer/range), `:AutoDbgCancel`, `:AutoDbgHealth`, quickfix jump-to-error.
+- **Editor integration**: neovim plugin with `:AutoDbgRun` (buffer/range), `:AutoDbgCancel`, `:AutoDbgHealth`, `:AutoDbgRepl` (remote-only REPL), quickfix jump-to-error.
 - **Legacy-DOS-era support**: x86 subsystem version patched to 4.0, all Win9x-risky imports go through a dynamic-API layer, and a static import gate (`tools/api_check`) keeps XP+ symbols out of the legacy import table.
 
 ---
@@ -123,6 +123,14 @@ Then `:AutoDbgRun` (or `:'<,'>AutoDbgRun`). See [`nvim/README.md`](./nvim/README
 
 > The plugin (separate repository) is being moved from the deleted HTTP transport to the raw TCP
 > client; local mode (`:AutoDbgRun` on a machine that has the exe) works unchanged meanwhile.
+
+`:AutoDbgRepl` is **remote-only**: it connects to a `--repl --server` that is *already running*
+(the plugin never spawns a process), and renders each round — echo, `out`, `event`, `result` — into
+a scratch buffer. D39's local-first rule does **not** apply to the REPL: with no address from the
+script header marker or `setup{}`, it reports an error instead of quietly falling back to the local
+exe. The programmable API (which is what drives the gate, where `input()` is unavailable) is
+`require("autodbg").repl_open(opts)` / `repl_eval(line)` / `repl_close()`; `config.repl` =
+`{ buffer = 'autodbg:repl', read_timeout_ms = 5000, event_summary = true }`.
 
 ### For AI agents
 

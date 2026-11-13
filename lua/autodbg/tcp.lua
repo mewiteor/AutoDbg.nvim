@@ -507,4 +507,14 @@ function M.control(cfg, name, opts)
   return reply or { type = "error", applied = false, error = "timeout" }
 end
 
+-- 帧原语导出（`repl.lua` 复用**同一份**编解码，不另立第二套）：
+--   `T` = 帧类型表，`pack_frame` / `take_frames` / `decode_json` / `wait_until` / `handshake`
+-- 这里的赋值只是把文件内已有的实现亮出来给消费方，行为与原来一字不差。
+M.T = T
+M.pack_frame = pack_frame
+M.take_frames = take_frames
+M.decode_json = decode_json
+M.wait_until = wait_until
+M.handshake = handshake
+
 return M

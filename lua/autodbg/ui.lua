@@ -5,24 +5,32 @@
 -- 形态：一个可复用的 scratch buffer（`buftype=nofile`），内容 = 头部摘要 + stdout
 --   + 可选的 `--- stderr ---` 段；错误行（`<file>:<line>: msg`）同时写进 quickfix，
 --   于是 `:copen` / `]q` 能直接跳到脚本的出错行。
+-- buffer 按名字取（`ensure_buf(name)`）：run 路径用默认那块，REPL 用 `config.repl.buffer`
+-- 那块（`render` 的第四参）——渲染器只有一份，不为 REPL 再写第二套。
 -- 高亮：用 extmark 而不是 syntax 文件 —— 内容结构是运行时才知道的，extmark 更直接。
 -- =============================================================================
 
 local M = {}
 
 local state = {
-  buf = nil, -- 复用的结果 buffer
+  bufs = {}, -- buffer 名字（"" = 默认结果 buffer）→ bufnr
 }
 
-local function ensure_buf()
-  if state.buf and vim.api.nvim_buf_is_valid(state.buf) then
-    return state.buf
+--- 拿（或建）scratch buffer；`name` 为 nil = run 路径的默认结果 buffer
+function M.ensure_buf(name)
+  local key = name or ""
+  if state.bufs[key] and vim.api.nvim_buf_is_valid(state.bufs[key]) then
+    return state.bufs[key]
   end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
-  state.buf = buf
+  if name then
+    -- 同名 buffer 已被别的 buffer 占用（E151）→ 保持无名，调用方仍按 bufnr 取内容
+    pcall(vim.api.nvim_buf_set_name, buf, name)
+  end
+  state.bufs[key] = buf
   return buf
 end
 
@@ -30,8 +38,9 @@ end
 -- @param lines   string[]
 -- @param marks   { line_index(0-based), hl_group }[]
 -- @param how     "split" | "vsplit" | "float" | nil（只更新不打开）
-function M.render(lines, marks, how)
-  local buf = ensure_buf()
+-- @param name    buffer 名字（nil = 默认那块；REPL 传 `config.repl.buffer`）
+function M.render(lines, marks, how, name)
+  local buf = M.ensure_buf(name)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
