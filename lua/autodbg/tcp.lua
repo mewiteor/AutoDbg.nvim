@@ -33,9 +33,11 @@ local T = {
   READ_RESP = 13,
   END = 14,
   CANCEL_NOTIFY = 15,
+  EVENT = 16,             -- 命中记录（T7 D2a）：带 `id` = 命令号，本文件**忽略**
 }
 
-local PROTO = 1          -- k_stream_proto_version
+-- T7 D2a：proto 1 -> 2（`event` 帧 + `out.id` 归因）
+local PROTO = 2          -- k_stream_proto_version
 
 -- ❗LuaJIT 没有 `string.pack` / 位运算符 → 帧编解码自己用 `bit` + `string.char`。
 local band, rshift = bit.band, bit.rshift
